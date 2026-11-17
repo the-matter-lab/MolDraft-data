@@ -1,0 +1,1004 @@
+[
+ {
+  "type": "SystemMessage",
+  "content": "You are a helpful chemistry assistant. You build 3D molecular\n  structures from the chemical information you are given, including 2D drawings\n  supplied as images.\n\n  When you are given a 2D drawing of a molecule, your task is to produce the 3D\n  structure that drawing depicts and save it as `answer.xyz` in your working\n  directory.\n\n  Requirements for `answer.xyz`:\n  - Include all explicit hydrogens.\n  - Use a right-handed Cartesian coordinate system, units of angstroms.\n  - Standard XYZ format: first line is the total atom count, second line a\n    one-line comment, each remaining line `Element X Y Z`.\n\n  When you are done, confirm that `answer.xyz` exists in the working directory.\n  "
+ },
+ {
+  "type": "HumanMessage",
+  "content": "A 2D structure of a molecule is provided as a PNG file in your working directory: mol_0054.png\n\nBuild the 3D structure it depicts and save it as answer.xyz.\n"
+ },
+ {
+  "type": "AIMessage",
+  "content": "I'll start by looking at the provided structure.",
+  "tool_calls": [
+   {
+    "name": "view_png_file",
+    "args": {
+     "png_file_relative_path": "mol_0054.png"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 2466,
+   "output_tokens": 75,
+   "total_tokens": 2541,
+   "input_token_details": {
+    "cache_creation": 0,
+    "cache_read": 2335,
+    "ephemeral_5m_input_tokens": 129,
+    "ephemeral_1h_input_tokens": 0
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[image]",
+  "name": "view_png_file",
+  "tool_call_id": "toolu_bdrk_01Uu4BQWro2FW7ePkX8qJ2GS"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "ls; python -c \"import numpy, scipy; print('ok')\""
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 2712,
+   "output_tokens": 13216,
+   "total_tokens": 15928,
+   "input_token_details": {
+    "cache_creation": 0,
+    "cache_read": 2464,
+    "ephemeral_5m_input_tokens": 246,
+    "ephemeral_1h_input_tokens": 0
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "mol_0054.png\nok\n",
+  "name": "bash_kernel",
+  "tool_call_id": "toolu_bdrk_01BwZs9ce7EHcKUjJkv1cPU6"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python -c \"import rdkit; print(rdkit.__version__)\"; which xtb"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 2799,
+   "output_tokens": 8705,
+   "total_tokens": 11504,
+   "input_token_details": {
+    "cache_creation": 0,
+    "cache_read": 2710,
+    "ephemeral_5m_input_tokens": 87,
+    "ephemeral_1h_input_tokens": 0
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "2026.03.1\n/h/400/skaxu/miniforge3/envs/elagente_env/bin/xtb\n",
+  "name": "bash_kernel",
+  "tool_call_id": "toolu_bdrk_01HnHM7diSnHbZBrkj3DqQad"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat << 'EOF' > build.py\nimport numpy as np\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem\n\ndef embed(smi, seed=0xf00d):\n    m = Chem.AddHs(Chem.MolFromSmiles(smi))\n    AllChem.EmbedMolecule(m, randomSeed=seed)\n    AllChem.MMFFOptimizeMolecule(m, maxIters=2000)\n    return m\n\ndef coords(m):\n    return np.array(m.GetConformer().GetPositions())\n\n# ---------- ligand: 1-mesityl-imidazol-2-yl ----------\nlig = embed(\"Cc1cc(C)cc(C)c1n1ccnc1\")\nP = coords(lig)\n# find imidazole ring\nri = lig.GetRingInfo()\nimid = None\nfor ring in ri.AtomRings():\n    if len(ring)==5:\n        imid = list(ring)\nprint(\"imid\", [(i, lig.GetAtomWithIdx(i).GetSymbol()) for i in imid])\nNs = [i for i in imid if lig.GetAtomWithIdx(i).GetSymbol()=='N']\n# C2 : carbon bonded to both N\nC2 = None\nfor i in imid:\n    a = lig.GetAtomWithIdx(i)\n    if a.GetSymbol()=='C':\n        nb = [x.GetIdx() for x in a.GetNeighbors()]\n        if all(n in nb for n in Ns): C2 = i\n# N1 = N bearing aryl (degree 3 heavy in ring + aryl), N3 = other\ndef nsub(i):\n    a = lig.GetAtomWithIdx(i)\n    return sum(1 for x in a.GetNeighbors() if x.GetIdx() not in imid)\nN1 = [i for i in Ns if nsub(i)==1][0]\nN3 = [i for i in Ns if i!=N1][0]\nprint(\"C2,N1,N3\",C2,N1,N3)\n# H on C2 to delete\nHc2 = [x.GetIdx() for x in lig.GetAtomWithIdx(C2).GetNeighbors() if x.GetSymbol()=='H'][0]\nkeep = [i for i in range(lig.GetNumAtoms()) if i!=Hc2]\nlsym = [lig.GetAtomWithIdx(i).GetSymbol() for i in keep]\nLP = P[keep]\nidx = {o:n for n,o in enumerate(keep)}\nC2k, N1k, N3k = idx[C2], idx[N1], idx[N3]\nringk = [idx[i] for i in imid]\n\ndef frame(e1, e3raw):\n    e1 = e1/np.linalg.norm(e1)\n    e3 = e3raw - np.dot(e3raw,e1)*e1\n    e3 /= np.linalg.norm(e3)\n    e2 = np.cross(e3,e1)\n    return np.array([e1,e2,e3]).T   # columns\n\n# ring normal\nrp = LP[ringk]\ncen = rp.mean(0)\nu_,s_,vt_ = np.linalg.svd(rp-cen)\nnrm = vt_[2]\n\nFsrc = frame(LP[N3k]-LP[C2k], nrm)\nC2_t = np.array([-0.685, 1.776, 0.0])\nFtgt = frame(np.array([1.0,0,0]), np.array([0,0,1.0]))\nR = Ftgt @ Fsrc.T\nL = (R @ (LP - LP[C2k]).T).T + C2_t\n# ensure ring points +y\nif L[ringk].mean(0)[1] < C2_t[1]:\n    Rx = np.diag([1.0,-1.0,-1.0])\n    L = (Rx @ (L - C2_t).T).T + C2_t\nprint(\"ring centroid\", L[ringk].mean(0), \"N3\", L[N3k], \"N1\", L[N1k])\n\nRz = np.diag([-1.0,-1.0,1.0])\nLB = (Rz @ L.T).T\n\n# ---------- COD ----------\ncod = embed(\"C1CC=CCCC=C1\")\nCP = coords(cod)\ncsym = [a.GetSymbol() for a in cod.GetAtoms()]\n# alkene carbons\nalk = [b for b in cod.GetBonds() if b.GetBondType()==Chem.BondType.DOUBLE]\na1 = (alk[0].GetBeginAtomIdx(), alk[0].GetEndAtomIdx())\na2 = (alk[1].GetBeginAtomIdx(), alk[1].GetEndAtomIdx())\nM1 = CP[list(a1)].mean(0); M2 = CP[list(a2)].mean(0)\nch2 = [a.GetIdx() for a in cod.GetAtoms() if a.GetSymbol()=='C' and a.GetIdx() not in a1+a2]\nMmid = 0.5*(M1+M2)\nFsrc_c = frame(M2-M1, CP[ch2].mean(0)-Mmid)\nFtgt_c = frame(np.array([0,-1.0,0]), np.array([-1.0,0,0]))\nRc = Ftgt_c @ Fsrc_c.T\nIr1 = np.array([-1.75,0,0]); Ir2 = np.array([1.75,0,0])\norig_t = Ir1 + np.array([-1.50,0,0])\nC1 = (Rc @ (CP - Mmid).T).T + orig_t\nC2cod = (Rz @ C1.T).T\n\nsyms = lsym + lsym + csym + csym + ['Ir','Ir']\nxyz  = np.vstack([L, LB, C1, C2cod, Ir1[None,:], Ir2[None,:]])\nn = len(syms)\nwith open('start.xyz','w') as f:\n    f.write(f\"{n}\\nstart\\n\")\n    for s,p in zip(syms,xyz):\n        f.write(f\"{s} {p[0]:.4f} {p[1]:.4f} {p[2]:.4f}\\n\")\n# index bookkeeping\nnl = len(lsym); nc = len(csym)\noff = {'A':0,'B':nl,'C1':2*nl,'C2':2*nl+nc,'Ir1':2*nl+2*nc,'Ir2':2*nl+2*nc+1}\ninfo = dict(off=off, C2k=C2k, N3k=N3k, alk=[list(a1),list(a2)], nl=nl, nc=nc)\nimport json; json.dump(info, open('info.json','w'))\nprint(info, n)\nEOF\npython build.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 2919,
+   "output_tokens": 9596,
+   "total_tokens": 12515,
+   "input_token_details": {
+    "cache_creation": 0,
+    "cache_read": 2797,
+    "ephemeral_5m_input_tokens": 120,
+    "ephemeral_1h_input_tokens": 0
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "imid [(10, 'C'), (9, 'N'), (13, 'C'), (12, 'N'), (11, 'C')]\nC2,N1,N3 13 9 12\nring centroid [-8.35931595e-02  2.71921685e+00  1.34677659e-03] N3 [ 6.30302062e-01  1.77600000e+00 -4.21208354e-17] N1 [-1.21394412  3.04761988  0.00933183]\n{'off': {'A': 0, 'B': 27, 'C1': 54, 'C2': 74, 'Ir1': 94, 'Ir2': 95}, 'C2k': 13, 'N3k': 12, 'alk': [[2, 3], [6, 7]], 'nl': 27, 'nc': 20} 96\n",
+  "name": "bash_kernel",
+  "tool_call_id": "toolu_bdrk_01GmgoMj3CEpa67dVCQBWrqv"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "view_molecule",
+    "args": {
+     "xyz_file_relative_path": "start.xyz",
+     "left_right_deg": 0,
+     "up_down_deg": 0,
+     "reset_view": true
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 5495,
+   "output_tokens": 1665,
+   "total_tokens": 7160,
+   "input_token_details": {
+    "cache_creation": 0,
+    "cache_read": 2917,
+    "ephemeral_5m_input_tokens": 2576,
+    "ephemeral_1h_input_tokens": 0
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[image]",
+  "name": "view_molecule",
+  "tool_call_id": "toolu_bdrk_01U7SK9uw7J972KWkZL7pfg9"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat << 'EOF' > build2.py\nimport numpy as np, json\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem\n\ndef embed(smi, seed=42):\n    m = Chem.AddHs(Chem.MolFromSmiles(smi))\n    AllChem.EmbedMolecule(m, randomSeed=seed)\n    AllChem.MMFFOptimizeMolecule(m, maxIters=5000)\n    return m\ndef coords(m): return np.array(m.GetConformer().GetPositions())\n\n# ---- hexagon core ----\ndef hexcore(aIr=88.0, aC=136.0, aN=136.0, dIrC=2.05, dCN=1.37, dNIr=2.10):\n    pts=[]; p=np.array([0.0,0.0]); th=0.0\n    seq=[(dIrC,aC),(dCN,aN),(dNIr,aIr),(dIrC,aC),(dCN,aN),(dNIr,aIr)]\n    for L,ang in seq:\n        pts.append(p.copy())\n        p = p + L*np.array([np.cos(np.radians(th)), np.sin(np.radians(th))])\n        th += 180-ang\n    return np.array(pts)  # Ir1, C_A, N_A, Ir2, C_B, N_B\npts = hexcore()\nprint(pts, np.linalg.norm(pts[3]-pts[0]))\ncen = 0.5*(pts[0]+pts[3])\npts = pts - cen\n# rotate so Ir1->Ir2 along +x\nv = pts[3]-pts[0]; a = np.arctan2(v[1],v[0])\nR2 = np.array([[np.cos(-a),-np.sin(-a)],[np.sin(-a),np.cos(-a)]])\npts = (R2@pts.T).T\nP3 = np.c_[pts, np.zeros(6)]\nIr1,CA,NA,Ir2,CB,NB = P3\nprint(P3)\n\ndef frame(e1,e3raw):\n    e1=e1/np.linalg.norm(e1)\n    e3=e3raw-np.dot(e3raw,e1)*e1; e3/=np.linalg.norm(e3)\n    e2=np.cross(e3,e1)\n    return np.array([e1,e2,e3]).T\n\n# ---- ligand ----\nlig = embed(\"Cc1cc(C)cc(C)c1n1ccnc1\")\nLPall = coords(lig)\nimid = [list(r) for r in lig.GetRingInfo().AtomRings() if len(r)==5][0]\nNs=[i for i in imid if lig.GetAtomWithIdx(i).GetSymbol()=='N']\nC2=[i for i in imid if lig.GetAtomWithIdx(i).GetSymbol()=='C' and\n    all(n in [x.GetIdx() for x in lig.GetAtomWithIdx(i).GetNeighbors()] for n in Ns)][0]\nN1=[i for i in Ns if sum(1 for x in lig.GetAtomWithIdx(i).GetNeighbors() if x.GetIdx() not in imid)==1][0]\nN3=[i for i in Ns if i!=N1][0]\nHc2=[x.GetIdx() for x in lig.GetAtomWithIdx(C2).GetNeighbors() if x.GetSymbol()=='H'][0]\nkeep=[i for i in range(lig.GetNumAtoms()) if i!=Hc2]\nlsym=[lig.GetAtomWithIdx(i).GetSymbol() for i in keep]\nLP=LPall[keep]; idx={o:n for n,o in enumerate(keep)}\nC2k,N1k,N3k=idx[C2],idx[N1],idx[N3]; ringk=[idx[i] for i in imid]\nrp=LP[ringk]; rc=rp.mean(0); nrm=np.linalg.svd(rp-rc)[2][2]\nFs=frame(LP[N3k]-LP[C2k], nrm)\n\ndef place_lig(Cpos,Npos):\n    Ft=frame(Npos-Cpos, np.array([0,0,1.0]))\n    R=Ft@Fs.T\n    X=(R@(LP-LP[C2k]).T).T+Cpos\n    # flip about e1 axis if ring centroid is toward core center (origin)\n    mid=0.5*(Cpos+Npos)\n    out=mid/np.linalg.norm(mid)\n    if np.dot(X[ringk].mean(0)-mid, out) < 0:\n        e1=(Npos-Cpos)/np.linalg.norm(Npos-Cpos)\n        # rotate 180 deg about e1 through Cpos\n        Rr=2*np.outer(e1,e1)-np.eye(3)\n        X=(Rr@(X-Cpos).T).T+Cpos\n    return X\nLA=place_lig(CA,NA); LB=place_lig(CB,NB)\n\n# ---- COD ----\ncod=embed(\"C1CC=CCCC=C1\")\nCP=coords(cod); csym=[a.GetSymbol() for a in cod.GetAtoms()]\ndb=[b for b in cod.GetBonds() if b.GetBondType()==Chem.BondType.DOUBLE]\na1=[db[0].GetBeginAtomIdx(),db[0].GetEndAtomIdx()]; a2=[db[1].GetBeginAtomIdx(),db[1].GetEndAtomIdx()]\nM1s=CP[a1].mean(0); M2s=CP[a2].mean(0)\nch2=[a.GetIdx() for a in cod.GetAtoms() if a.GetSymbol()=='C' and a.GetIdx() not in a1+a2]\nMm=0.5*(M1s+M2s)\nFsc=frame(M2s-M1s, CP[ch2].mean(0)-Mm)\n\ndef place_cod(Ir, d1, d2, R=2.12):\n    M1=Ir+R*d1/np.linalg.norm(d1); M2=Ir+R*d2/np.linalg.norm(d2)\n    Mt=0.5*(M1+M2)\n    Ft=frame(M2-M1, Mt-Ir)\n    Rr=Ft@Fsc.T\n    return (Rr@(CP-Mm).T).T+Mt\n\n# Ir1 donors: CA and NB -> free dirs opposite\ndA=(CA-Ir1)/np.linalg.norm(CA-Ir1); dB=(NB-Ir1)/np.linalg.norm(NB-Ir1)\nC1x=place_cod(Ir1,-dA,-dB)\ndA2=(CB-Ir2)/np.linalg.norm(CB-Ir2); dB2=(NA-Ir2)/np.linalg.norm(NA-Ir2)\nC2x=place_cod(Ir2,-dA2,-dB2)\n\nsyms=lsym+lsym+csym+csym+['Ir','Ir']\nX=np.vstack([LA,LB,C1x,C2x,Ir1[None,:],Ir2[None,:]])\nwith open('start.xyz','w') as f:\n    f.write(f\"{len(syms)}\\nstart\\n\")\n    for s,p in zip(syms,X): f.write(f\"{s} {p[0]:.4f} {p[1]:.4f} {p[2]:.4f}\\n\")\nnl=len(lsym);nc=len(csym)\njson.dump(dict(nl=nl,nc=nc,C2k=C2k,N3k=N3k,N1k=N1k,ring=ringk,a1=a1,a2=a2,\n    off=dict(A=0,B=nl,CODa=2*nl,CODb=2*nl+nc,Ir1=2*nl+2*nc,Ir2=2*nl+2*nc+1)),open('info.json','w'))\nprint(len(syms))\n# min distance check\nfrom scipy.spatial.distance import pdist,squareform\nD=squareform(pdist(X)); np.fill_diagonal(D,9)\nprint(\"min dist\", D.min())\nii=np.unravel_index(np.argmin(D),D.shape); print(ii, syms[ii[0]],syms[ii[1]])\nEOF\npython build2.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 6948,
+   "output_tokens": 7565,
+   "total_tokens": 14513,
+   "input_token_details": {
+    "cache_creation": 0,
+    "cache_read": 5493,
+    "ephemeral_5m_input_tokens": 1453,
+    "ephemeral_1h_input_tokens": 0
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[[0.         0.        ]\n [2.05       0.        ]\n [3.03549553 0.95168197]\n [3.10878447 3.0504027 ]\n [1.05878447 3.0504027 ]\n [0.07328894 2.09872074]] 4.355398665594154\n[[-2.17769933e+00 -3.53370326e-18  0.00000000e+00]\n [-7.14455976e-01 -1.43576421e+00  0.00000000e+00]\n [ 6.55500460e-01 -1.44668953e+00  0.00000000e+00]\n [ 2.17769933e+00  3.53370326e-18  0.00000000e+00]\n [ 7.14455976e-01  1.43576421e+00  0.00000000e+00]\n [-6.55500460e-01  1.44668953e+00  0.00000000e+00]]\n96\nmin dist 0.5542407416012427\n(np.int64(51), np.int64(74)) H C\n",
+  "name": "bash_kernel",
+  "tool_call_id": "toolu_bdrk_019jNV3VWdYRmXDPDYYPgKcE"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "view_molecule",
+    "args": {
+     "xyz_file_relative_path": "start.xyz",
+     "left_right_deg": 0,
+     "up_down_deg": 0,
+     "reset_view": true
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 10145,
+   "output_tokens": 275,
+   "total_tokens": 10420,
+   "input_token_details": {
+    "cache_creation": 0,
+    "cache_read": 6946,
+    "ephemeral_5m_input_tokens": 3197,
+    "ephemeral_1h_input_tokens": 0
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[image]",
+  "name": "view_molecule",
+  "tool_call_id": "toolu_bdrk_01KVvDVreQVkdtWpCiW57hYg"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python << 'EOF'\nimport numpy as np, json\nfrom scipy.spatial.distance import pdist, squareform\nL=open('start.xyz').read().split('\\n')\nn=int(L[0]); sym=[];X=[]\nfor l in L[2:2+n]:\n    p=l.split(); sym.append(p[0]); X.append([float(x) for x in p[1:4]])\nX=np.array(X)\ninfo=json.load(open('info.json')); print(info)\nD=squareform(pdist(X)); np.fill_diagonal(D,9)\nnl=info['nl']\ndef grp(i):\n    o=info['off']\n    if i<nl: return 'A'\n    if i<2*nl: return 'B'\n    if i<2*nl+info['nc']: return 'CODa'\n    if i<2*nl+2*info['nc']: return 'CODb'\n    return 'Ir'\nfor i in range(n):\n    for j in range(i+1,n):\n        if D[i,j]<2.0 and grp(i)!=grp(j):\n            print(i,sym[i],grp(i),j,sym[j],grp(j),round(D[i,j],2))\nEOF"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 11598,
+   "output_tokens": 1696,
+   "total_tokens": 13294,
+   "input_token_details": {
+    "cache_creation": 0,
+    "cache_read": 10143,
+    "ephemeral_5m_input_tokens": 1453,
+    "ephemeral_1h_input_tokens": 0
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "{'nl': 27, 'nc': 20, 'C2k': 13, 'N3k': 12, 'N1k': 9, 'ring': [10, 9, 13, 12, 11], 'a1': [2, 3], 'a2': [6, 7], 'off': {'A': 0, 'B': 27, 'CODa': 54, 'CODb': 74, 'Ir1': 94, 'Ir2': 95}}\n1 C A 72 H CODa 1.64\n2 C A 72 H CODa 1.93\n5 C A 61 C CODa 1.78\n5 C A 73 H CODa 1.96\n6 C A 54 C CODa 1.94\n6 C A 60 C CODa 1.77\n6 C A 61 C CODa 0.77\n6 C A 73 H CODa 0.63\n7 C A 54 C CODa 0.99\n7 C A 61 C CODa 1.44\n7 C A 62 H CODa 0.73\n7 C A 63 H CODa 1.86\n7 C A 73 H CODa 1.59\n8 C A 61 C CODa 1.68\n8 C A 72 H CODa 1.8\n8 C A 73 H CODa 1.06\n9 N A 73 H CODa 1.91\n12 N A 85 H CODb 1.76\n22 H A 54 C CODa 1.43\n22 H A 62 H CODa 0.75\n22 H A 63 H CODa 1.65\n23 H A 54 C CODa 1.95\n23 H A 62 H CODa 1.27\n23 H A 73 H CODa 1.91\n24 H A 54 C CODa 0.55\n24 H A 55 C CODa 1.11\n24 H A 61 C CODa 1.65\n24 H A 62 H CODa 1.21\n24 H A 63 H CODa 1.58\n24 H A 64 H CODa 1.75\n24 H A 65 H CODa 1.68\n24 H A 94 Ir Ir 1.79\n28 C B 92 H CODb 1.64\n29 C B 92 H CODb 1.93\n32 C B 81 C CODb 1.78\n32 C B 93 H CODb 1.96\n33 C B 74 C CODb 1.94\n33 C B 80 C CODb 1.77\n33 C B 81 C CODb 0.77\n33 C B 93 H CODb 0.63\n34 C B 74 C CODb 0.99\n34 C B 81 C CODb 1.44\n34 C B 82 H CODb 0.73\n34 C B 83 H CODb 1.86\n34 C B 93 H CODb 1.59\n35 C B 81 C CODb 1.68\n35 C B 92 H CODb 1.8\n35 C B 93 H CODb 1.06\n36 N B 93 H CODb 1.91\n39 N B 65 H CODa 1.76\n49 H B 74 C CODb 1.43\n49 H B 82 H CODb 0.75\n49 H B 83 H CODb 1.65\n50 H B 74 C CODb 1.95\n50 H B 82 H CODb 1.27\n50 H B 93 H CODb 1.91\n51 H B 74 C CODb 0.55\n51 H B 75 C CODb 1.11\n51 H B 81 C CODb 1.65\n51 H B 82 H CODb 1.21\n51 H B 83 H CODb 1.58\n51 H B 84 H CODb 1.75\n51 H B 85 H CODb 1.68\n51 H B 95 Ir Ir 1.79\n55 C CODa 94 Ir Ir 1.48\n65 H CODa 94 Ir Ir 0.8\n69 H CODa 94 Ir Ir 1.94\n75 C CODb 95 Ir Ir 1.48\n85 H CODb 95 Ir Ir 0.8\n89 H CODb 95 Ir Ir 1.94\n",
+  "name": "bash_kernel",
+  "tool_call_id": "toolu_bdrk_01SADgJdruJipaiZhbQwcnTc"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat << 'EOF' > build3.py\nimport numpy as np, json\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem\nfrom scipy.spatial.distance import pdist, squareform\n\ndef embed(smi, seed=42):\n    m=Chem.AddHs(Chem.MolFromSmiles(smi)); AllChem.EmbedMolecule(m,randomSeed=seed)\n    AllChem.MMFFOptimizeMolecule(m,maxIters=5000); return m\ndef coords(m): return np.array(m.GetConformer().GetPositions())\ndef frame(e1,e3raw):\n    e1=e1/np.linalg.norm(e1); e3=e3raw-np.dot(e3raw,e1)*e1; e3/=np.linalg.norm(e3)\n    return np.array([e1,np.cross(e3,e1),e3]).T\n\n# core hexagon\ndef hexcore(aIr=88.0,aC=136.0,aN=136.0,dIrC=2.05,dCN=1.37,dNIr=2.10):\n    pts=[];p=np.array([0.0,0.0]);th=0.0\n    for L,ang in [(dIrC,aC),(dCN,aN),(dNIr,aIr),(dIrC,aC),(dCN,aN),(dNIr,aIr)]:\n        pts.append(p.copy()); p=p+L*np.array([np.cos(np.radians(th)),np.sin(np.radians(th))]); th+=180-ang\n    return np.array(pts)\npts=hexcore(); pts-=0.5*(pts[0]+pts[3])\nv=pts[3]-pts[0]; a=np.arctan2(v[1],v[0])\nR2=np.array([[np.cos(-a),-np.sin(-a)],[np.sin(-a),np.cos(-a)]]); pts=(R2@pts.T).T\nP3=np.c_[pts,np.zeros(6)]\nIr1,CA,NA,Ir2,CB,NB=P3\n\n# ligand\nlig=embed(\"Cc1cc(C)cc(C)c1n1ccnc1\"); LPall=coords(lig)\nimid=[list(r) for r in lig.GetRingInfo().AtomRings() if len(r)==5][0]\nNs=[i for i in imid if lig.GetAtomWithIdx(i).GetSymbol()=='N']\nC2=[i for i in imid if lig.GetAtomWithIdx(i).GetSymbol()=='C' and all(n in [x.GetIdx() for x in lig.GetAtomWithIdx(i).GetNeighbors()] for n in Ns)][0]\nN1=[i for i in Ns if sum(1 for x in lig.GetAtomWithIdx(i).GetNeighbors() if x.GetIdx() not in imid)==1][0]\nN3=[i for i in Ns if i!=N1][0]\nHc2=[x.GetIdx() for x in lig.GetAtomWithIdx(C2).GetNeighbors() if x.GetSymbol()=='H'][0]\nkeep=[i for i in range(lig.GetNumAtoms()) if i!=Hc2]\nlsym=[lig.GetAtomWithIdx(i).GetSymbol() for i in keep]\nLP=LPall[keep]; idx={o:n for n,o in enumerate(keep)}\nC2k,N1k,N3k=idx[C2],idx[N1],idx[N3]; ringk=[idx[i] for i in imid]\nrp=LP[ringk]; nrm=np.linalg.svd(rp-rp.mean(0))[2][2]\nFs=frame(LP[N3k]-LP[C2k],nrm)\ndef place_lig(Cpos,Npos):\n    R=frame(Npos-Cpos,np.array([0,0,1.0]))@Fs.T\n    X=(R@(LP-LP[C2k]).T).T+Cpos\n    mid=0.5*(Cpos+Npos); out=mid/np.linalg.norm(mid)\n    if np.dot(X[ringk].mean(0)-mid,out)<0:\n        e1=(Npos-Cpos)/np.linalg.norm(Npos-Cpos)\n        X=((2*np.outer(e1,e1)-np.eye(3))@(X-Cpos).T).T+Cpos\n    return X\nLA=place_lig(CA,NA); LB=place_lig(CB,NB)\n\n# COD\ncod=embed(\"C1CC=CCCC=C1\"); CP=coords(cod); csym=[a.GetSymbol() for a in cod.GetAtoms()]\ndb=[b for b in cod.GetBonds() if b.GetBondType()==Chem.BondType.DOUBLE]\na1=[db[0].GetBeginAtomIdx(),db[0].GetEndAtomIdx()]; a2=[db[1].GetBeginAtomIdx(),db[1].GetEndAtomIdx()]\nM1s=CP[a1].mean(0); M2s=CP[a2].mean(0); Mm=0.5*(M1s+M2s)\nb1=CP[a1[1]]-CP[a1[0]]; b2=CP[a2[1]]-CP[a2[0]]\nif np.dot(b1,b2)<0: b2=-b2\nbav=b1+b2\nFsc=frame(M2s-M1s,bav)\nprint(\"src |M1-M2|\",np.linalg.norm(M2s-M1s))\ndef place_cod(Ir,d1,d2,R=2.12,flip=False):\n    d1=d1/np.linalg.norm(d1); d2=d2/np.linalg.norm(d2)\n    M1=Ir+R*d1; M2=Ir+R*d2; Mt=0.5*(M1+M2)\n    e1=M2-M1; out=Mt-Ir\n    nz=np.cross(e1,out)\n    if flip: nz=-nz\n    Rr=frame(e1,nz)@Fsc.T\n    return (Rr@(CP-Mm).T).T+Mt\ndA=CA-Ir1; dB=NB-Ir1\nCODa=place_cod(Ir1,-dA,-dB)\nCODb=place_cod(Ir2,-(CB-Ir2),-(NA-Ir2))\nprint(\"angle at Ir1\", np.degrees(np.arccos(np.dot(dA/np.linalg.norm(dA),dB/np.linalg.norm(dB)))))\n\nsyms=lsym+lsym+csym+csym+['Ir','Ir']\nX=np.vstack([LA,LB,CODa,CODb,Ir1[None,:],Ir2[None,:]])\nwith open('start.xyz','w') as f:\n    f.write(f\"{len(syms)}\\nstart\\n\")\n    for s,p in zip(syms,X): f.write(f\"{s} {p[0]:.4f} {p[1]:.4f} {p[2]:.4f}\\n\")\nnl=len(lsym);nc=len(csym)\njson.dump(dict(nl=nl,nc=nc,C2k=C2k,N3k=N3k,N1k=N1k,ring=ringk,a1=a1,a2=a2,\n off=dict(A=0,B=nl,CODa=2*nl,CODb=2*nl+nc,Ir1=2*nl+2*nc,Ir2=2*nl+2*nc+1)),open('info.json','w'))\nD=squareform(pdist(X)); np.fill_diagonal(D,9)\ndef grp(i):\n    if i<nl: return 'A'\n    if i<2*nl: return 'B'\n    if i<2*nl+nc: return 'CODa'\n    if i<2*nl+2*nc: return 'CODb'\n    return 'Ir'\nbad=[(i,syms[i],grp(i),j,syms[j],grp(j),round(D[i,j],2)) for i in range(len(syms)) for j in range(i+1,len(syms)) if D[i,j]<2.0 and grp(i)!=grp(j)]\nfor b in bad: print(b)\nprint(\"nbad\",len(bad))\nEOF\npython build3.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 13321,
+   "output_tokens": 3816,
+   "total_tokens": 17137,
+   "input_token_details": {
+    "cache_creation": 0,
+    "cache_read": 11596,
+    "ephemeral_5m_input_tokens": 1723,
+    "ephemeral_1h_input_tokens": 0
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "src |M1-M2| 3.4495522668676863\nangle at Ir1 87.99999999999999\n(1, 'C', 'A', 73, 'H', 'CODa', np.float64(1.76))\n(2, 'C', 'A', 73, 'H', 'CODa', np.float64(1.85))\n(5, 'C', 'A', 60, 'C', 'CODa', np.float64(1.58))\n(5, 'C', 'A', 72, 'H', 'CODa', np.float64(0.84))\n(6, 'C', 'A', 59, 'C', 'CODa', np.float64(1.94))\n(6, 'C', 'A', 60, 'C', 'CODa', np.float64(0.77))\n(6, 'C', 'A', 61, 'C', 'CODa', np.float64(1.76))\n(6, 'C', 'A', 72, 'H', 'CODa', np.float64(0.66))\n(7, 'C', 'A', 59, 'C', 'CODa', np.float64(0.92))\n(7, 'C', 'A', 60, 'C', 'CODa', np.float64(1.48))\n(7, 'C', 'A', 70, 'H', 'CODa', np.float64(0.74))\n(7, 'C', 'A', 71, 'H', 'CODa', np.float64(1.53))\n(7, 'C', 'A', 72, 'H', 'CODa', np.float64(1.75))\n(8, 'C', 'A', 60, 'C', 'CODa', np.float64(1.84))\n(8, 'C', 'A', 61, 'C', 'CODa', np.float64(1.86))\n(8, 'C', 'A', 72, 'H', 'CODa', np.float64(1.92))\n(8, 'C', 'A', 73, 'H', 'CODa', np.float64(1.95))\n(21, 'H', 'A', 72, 'H', 'CODa', np.float64(1.56))\n(22, 'H', 'A', 59, 'C', 'CODa', np.float64(1.56))\n(22, 'H', 'A', 70, 'H', 'CODa', np.float64(0.72))\n(23, 'H', 'A', 59, 'C', 'CODa', np.float64(1.78))\n(23, 'H', 'A', 70, 'H', 'CODa', np.float64(1.29))\n(23, 'H', 'A', 71, 'H', 'CODa', np.float64(1.74))\n(24, 'H', 'A', 58, 'C', 'CODa', np.float64(1.54))\n(24, 'H', 'A', 59, 'C', 'CODa', np.float64(0.3))\n(24, 'H', 'A', 60, 'C', 'CODa', np.float64(1.71))\n(24, 'H', 'A', 70, 'H', 'CODa', np.float64(1.22))\n(24, 'H', 'A', 71, 'H', 'CODa', np.float64(0.85))\n(24, 'H', 'A', 94, 'Ir', 'Ir', np.float64(1.79))\n(26, 'H', 'A', 86, 'H', 'CODb', np.float64(1.84))\n(26, 'H', 'A', 87, 'H', 'CODb', np.float64(1.83))\n(28, 'C', 'B', 93, 'H', 'CODb', np.float64(1.76))\n(29, 'C', 'B', 93, 'H', 'CODb', np.float64(1.85))\n(32, 'C', 'B', 80, 'C', 'CODb', np.float64(1.58))\n(32, 'C', 'B', 92, 'H', 'CODb', np.float64(0.84))\n(33, 'C', 'B', 79, 'C', 'CODb', np.float64(1.94))\n(33, 'C', 'B', 80, 'C', 'CODb', np.float64(0.77))\n(33, 'C', 'B', 81, 'C', 'CODb', np.float64(1.76))\n(33, 'C', 'B', 92, 'H', 'CODb', np.float64(0.66))\n(34, 'C', 'B', 79, 'C', 'CODb', np.float64(0.92))\n(34, 'C', 'B', 80, 'C', 'CODb', np.float64(1.48))\n(34, 'C', 'B', 90, 'H', 'CODb', np.float64(0.74))\n(34, 'C', 'B', 91, 'H', 'CODb', np.float64(1.53))\n(34, 'C', 'B', 92, 'H', 'CODb', np.float64(1.75))\n(35, 'C', 'B', 80, 'C', 'CODb', np.float64(1.84))\n(35, 'C', 'B', 81, 'C', 'CODb', np.float64(1.86))\n(35, 'C', 'B', 92, 'H', 'CODb', np.float64(1.92))\n(35, 'C', 'B', 93, 'H', 'CODb', np.float64(1.95))\n(48, 'H', 'B', 92, 'H', 'CODb', np.float64(1.56))\n(49, 'H', 'B', 79, 'C', 'CODb', np.float64(1.56))\n(49, 'H', 'B', 90, 'H', 'CODb', np.float64(0.72))\n(50, 'H', 'B', 79, 'C', 'CODb', np.float64(1.78))\n(50, 'H', 'B', 90, 'H', 'CODb', np.float64(1.29))\n(50, 'H', 'B', 91, 'H', 'CODb', np.float64(1.74))\n(51, 'H', 'B', 78, 'C', 'CODb', np.float64(1.54))\n(51, 'H', 'B', 79, 'C', 'CODb', np.float64(0.3))\n(51, 'H', 'B', 80, 'C', 'CODb', np.float64(1.71))\n(51, 'H', 'B', 90, 'H', 'CODb', np.float64(1.22))\n(51, 'H', 'B', 91, 'H', 'CODb', np.float64(0.85))\n(51, 'H', 'B', 95, 'Ir', 'Ir', np.float64(1.79))\n(53, 'H', 'B', 66, 'H', 'CODa', np.float64(1.84))\n(53, 'H', 'B', 67, 'H', 'CODa', np.float64(1.83))\n(54, 'C', 'CODa', 94, 'Ir', 'Ir', np.float64(1.98))\n(59, 'C', 'CODa', 94, 'Ir', 'Ir', np.float64(1.98))\n(63, 'H', 'CODa', 94, 'Ir', 'Ir', np.float64(1.36))\n(71, 'H', 'CODa', 94, 'Ir', 'Ir', np.float64(1.36))\n(74, 'C', 'CODb', 95, 'Ir', 'Ir', np.float64(1.98))\n(79, 'C', 'CODb', 95, 'Ir', 'Ir', np.float64(1.98))\n(83, 'H', 'CODb', 95, 'Ir', 'Ir', np.float64(1.36))\n(91, 'H', 'CODb', 95, 'Ir', 'Ir', np.float64(1.36))\nnbad 70\n",
+  "name": "bash_kernel",
+  "tool_call_id": "toolu_bdrk_01Q9Mb2a3KMA4ThxDH7k4n1a"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python << 'EOF'\nimport numpy as np\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem\nm=Chem.AddHs(Chem.MolFromSmiles(\"C1CC=CCCC=C1\"))\ncids=AllChem.EmbedMultipleConfs(m,numConfs=20,randomSeed=7)\nres=AllChem.MMFFOptimizeMoleculeConfs(m,maxIters=5000)\ndb=[b for b in m.GetBonds() if b.GetBondType()==Chem.BondType.DOUBLE]\na1=[db[0].GetBeginAtomIdx(),db[0].GetEndAtomIdx()];a2=[db[1].GetBeginAtomIdx(),db[1].GetEndAtomIdx()]\nfor c in cids:\n    P=np.array(m.GetConformer(c).GetPositions())\n    M1=P[a1].mean(0);M2=P[a2].mean(0)\n    print(c, round(res[c][1],2), round(np.linalg.norm(M1-M2),3))\nEOF"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 18601,
+   "output_tokens": 2840,
+   "total_tokens": 21441,
+   "input_token_details": {
+    "cache_creation": 0,
+    "cache_read": 13319,
+    "ephemeral_5m_input_tokens": 5280,
+    "ephemeral_1h_input_tokens": 0
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "0 36.39 3.45\n1 36.39 3.45\n2 36.39 3.45\n3 33.86 3.214\n4 36.39 3.45\n5 36.39 3.45\n6 36.39 3.45\n7 33.86 3.214\n8 36.39 3.45\n9 36.39 3.45\n10 36.39 3.45\n11 33.86 3.214\n12 36.39 3.45\n13 33.86 3.214\n14 33.86 3.214\n15 36.39 3.45\n16 37.87 3.279\n17 36.39 3.45\n18 33.86 3.214\n19 36.39 3.45\n",
+  "name": "bash_kernel",
+  "tool_call_id": "toolu_bdrk_01DMANKKGnnvnJfo1eABe7sR"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat << 'EOF' > build4.py\nimport numpy as np, json, itertools\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem, rdMolTransforms\nfrom scipy.spatial.distance import cdist\n\ndef frame(e1,e3raw):\n    e1=e1/np.linalg.norm(e1); e3=e3raw-np.dot(e3raw,e1)*e1; e3/=np.linalg.norm(e3)\n    return np.array([e1,np.cross(e3,e1),e3]).T\ndef rotmat(axis,ang):\n    axis=axis/np.linalg.norm(axis); K=np.array([[0,-axis[2],axis[1]],[axis[2],0,-axis[0]],[-axis[1],axis[0],0]])\n    return np.eye(3)+np.sin(ang)*K+(1-np.cos(ang))*K@K\n\n# ---- core ----\ndef hexcore(aIr=88.0,aC=136.0,aN=136.0,dIrC=2.05,dCN=1.37,dNIr=2.10):\n    pts=[];p=np.array([0.0,0.0]);th=0.0\n    for L,ang in [(dIrC,aC),(dCN,aN),(dNIr,aIr),(dIrC,aC),(dCN,aN),(dNIr,aIr)]:\n        pts.append(p.copy()); p=p+L*np.array([np.cos(np.radians(th)),np.sin(np.radians(th))]); th+=180-ang\n    return np.array(pts)\npts=hexcore(); pts-=0.5*(pts[0]+pts[3])\nv=pts[3]-pts[0]; a=np.arctan2(v[1],v[0])\nR2=np.array([[np.cos(-a),-np.sin(-a)],[np.sin(-a),np.cos(-a)]]); pts=(R2@pts.T).T\nP3=np.c_[pts,np.zeros(6)]\nIr1,CA,NA,Ir2,CB,NB=P3\nRz=np.diag([-1.0,-1.0,1.0])\nassert np.allclose(Rz@CA,CB,atol=1e-6)\n\n# ---- ligand template ----\nlig=Chem.AddHs(Chem.MolFromSmiles(\"Cc1cc(C)cc(C)c1n1ccnc1\"))\nAllChem.EmbedMolecule(lig,randomSeed=11); AllChem.MMFFOptimizeMolecule(lig,maxIters=5000)\nimid=[list(r) for r in lig.GetRingInfo().AtomRings() if len(r)==5][0]\nNs=[i for i in imid if lig.GetAtomWithIdx(i).GetSymbol()=='N']\nC2=[i for i in imid if lig.GetAtomWithIdx(i).GetSymbol()=='C' and all(n in [x.GetIdx() for x in lig.GetAtomWithIdx(i).GetNeighbors()] for n in Ns)][0]\nN1=[i for i in Ns if sum(1 for x in lig.GetAtomWithIdx(i).GetNeighbors() if x.GetIdx() not in imid)==1][0]\nN3=[i for i in Ns if i!=N1][0]\nCipso=[x.GetIdx() for x in lig.GetAtomWithIdx(N1).GetNeighbors() if x.GetIdx() not in imid][0]\nCortho=[x.GetIdx() for x in lig.GetAtomWithIdx(Cipso).GetNeighbors() if x.GetIdx()!=N1][0]\nconf=lig.GetConformer()\ndef set_mes_dih(val):\n    rdMolTransforms.SetDihedralDeg(conf, C2, N1, Cipso, Cortho, val)\nHc2=[x.GetIdx() for x in lig.GetAtomWithIdx(C2).GetNeighbors() if x.GetSymbol()=='H'][0]\nkeep=[i for i in range(lig.GetNumAtoms()) if i!=Hc2]\nlsym=[lig.GetAtomWithIdx(i).GetSymbol() for i in keep]\nidx={o:n for n,o in enumerate(keep)}\nC2k,N1k,N3k=idx[C2],idx[N1],idx[N3]; ringk=[idx[i] for i in imid]\n\ndef lig_coords(dih):\n    set_mes_dih(dih)\n    LP=np.array(conf.GetPositions())[keep]\n    rp=LP[ringk]; nrm=np.linalg.svd(rp-rp.mean(0))[2][2]\n    Fs=frame(LP[N3k]-LP[C2k],nrm)\n    R=frame(NA-CA,np.array([0,0,1.0]))@Fs.T\n    X=(R@(LP-LP[C2k]).T).T+CA\n    mid=0.5*(CA+NA); out=mid/np.linalg.norm(mid)\n    if np.dot(X[ringk].mean(0)-mid,out)<0:\n        e1=(NA-CA)/np.linalg.norm(NA-CA)\n        X=((2*np.outer(e1,e1)-np.eye(3))@(X-CA).T).T+CA\n    return X\n\n# ---- COD template ----\ncod=Chem.AddHs(Chem.MolFromSmiles(\"C1CC=CCCC=C1\"))\nAllChem.EmbedMolecule(cod,randomSeed=5); AllChem.MMFFOptimizeMolecule(cod,maxIters=5000)\nCP=np.array(cod.GetConformer().GetPositions()); csym=[a.GetSymbol() for a in cod.GetAtoms()]\ndb=[b for b in cod.GetBonds() if b.GetBondType()==Chem.BondType.DOUBLE]\na1=[db[0].GetBeginAtomIdx(),db[0].GetEndAtomIdx()]; a2=[db[1].GetBeginAtomIdx(),db[1].GetEndAtomIdx()]\nM1s=CP[a1].mean(0); M2s=CP[a2].mean(0); Mm=0.5*(M1s+M2s)\nb1=CP[a1[1]]-CP[a1[0]]; b2=CP[a2[1]]-CP[a2[0]]\nif np.dot(b1,b2)<0: b2=-b2\nFsc=frame(M2s-M1s,b1+b2)\n\ndA=-(CA-Ir1); dB=-(NB-Ir1)   # free directions at Ir1\ndA/=np.linalg.norm(dA); dB/=np.linalg.norm(dB)\ndef cod_coords(R, psi, flip):\n    M1=Ir1+R*dA; M2=Ir1+R*dB; Mt=0.5*(M1+M2)\n    e1=M2-M1; out=Mt-Ir1; nz=np.cross(e1,out)\n    if flip: nz=-nz\n    Rr=frame(e1,nz)@Fsc.T\n    X=(Rr@(CP-Mm).T).T+Mt\n    # rotate about Ir1->Mt axis\n    Rp=rotmat(out,np.radians(psi))\n    X=(Rp@(X-Ir1).T).T+Ir1\n    return X\n\ncore_idx=None\ndef assemble(dih,R,psi,flip):\n    LA=lig_coords(dih); CODa=cod_coords(R,psi,flip)\n    LB=(Rz@LA.T).T; CODb=(Rz@CODa.T).T\n    syms=lsym+lsym+csym+csym+['Ir','Ir']\n    X=np.vstack([LA,LB,CODa,CODb,Ir1[None,:],Ir2[None,:]])\n    return syms,X,dict(LA=LA,LB=LB,CODa=CODa,CODb=CODb)\n\nrad={'C':1.7,'N':1.55,'H':1.1,'Ir':1.9}\ndef score(syms,X,nl,nc):\n    grps=[(0,nl),(nl,2*nl),(2*nl,2*nl+nc),(2*nl+nc,2*nl+2*nc),(2*nl+2*nc,2*nl+2*nc+2)]\n    s=0.0\n    for g1,g2 in itertools.combinations(range(5),2):\n        A=slice(*grps[g1]); B=slice(*grps[g2])\n        D=cdist(X[A],X[B])\n        r1=np.array([rad[s_] for s_ in syms[A]]); r2=np.array([rad[s_] for s_ in syms[B]])\n        # metal-ligand pairs: allow close\n        lim=0.80*(r1[:,None]+r2[None,:])\n        if g1==4 or g2==4: lim=lim*0.75\n        ov=np.clip(lim-D,0,None)\n        s+=(ov**2).sum()\n    return s\n\nnl=len(lsym); nc=len(csym)\nbest=None\nfor dih in range(0,360,15):\n    for R in [2.12,2.25,2.4]:\n        for psi in range(-40,41,10):\n            for flip in [False,True]:\n                syms,X,_=assemble(dih,R,psi,flip)\n                s=score(syms,X,nl,nc)\n                if best is None or s<best[0]: best=(s,dih,R,psi,flip)\nprint(\"best\",best)\ns,dih,R,psi,flip=best\nsyms,X,parts=assemble(dih,R,psi,flip)\nwith open('start.xyz','w') as f:\n    f.write(f\"{len(syms)}\\nstart\\n\")\n    for sy,p in zip(syms,X): f.write(f\"{sy} {p[0]:.4f} {p[1]:.4f} {p[2]:.4f}\\n\")\njson.dump(dict(nl=nl,nc=nc,C2k=C2k,N3k=N3k,N1k=N1k,ring=ringk,a1=a1,a2=a2,\n off=dict(A=0,B=nl,CODa=2*nl,CODb=2*nl+nc,Ir1=2*nl+2*nc,Ir2=2*nl+2*nc+1)),open('info.json','w'))\nfrom scipy.spatial.distance import pdist, squareform\nD=squareform(pdist(X)); np.fill_diagonal(D,9)\ndef grp(i):\n    if i<nl: return 'A'\n    if i<2*nl: return 'B'\n    if i<2*nl+nc: return 'CODa'\n    if i<2*nl+2*nc: return 'CODb'\n    return 'Ir'\nbad=[(i,syms[i],grp(i),j,syms[j],grp(j),round(D[i,j],2)) for i in range(len(syms)) for j in range(i+1,len(syms)) if D[i,j]<2.2 and grp(i)!=grp(j)]\nfor b in bad: print(b)\nEOF\npython build4.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 19222,
+   "output_tokens": 6797,
+   "total_tokens": 26019,
+   "input_token_details": {
+    "cache_creation": 0,
+    "cache_read": 18599,
+    "ephemeral_5m_input_tokens": 621,
+    "ephemeral_1h_input_tokens": 0
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "best (np.float64(13.449910761169882), 270, 2.4, -40, True)\n(0, 'C', 'A', 73, 'H', 'CODa', np.float64(1.98))\n(1, 'C', 'A', 60, 'C', 'CODa', np.float64(1.9))\n(1, 'C', 'A', 72, 'H', 'CODa', np.float64(0.97))\n(2, 'C', 'A', 60, 'C', 'CODa', np.float64(2.14))\n(2, 'C', 'A', 72, 'H', 'CODa', np.float64(1.58))\n(3, 'C', 'A', 70, 'H', 'CODa', np.float64(1.81))\n(3, 'C', 'A', 72, 'H', 'CODa', np.float64(2.16))\n(5, 'C', 'A', 70, 'H', 'CODa', np.float64(1.35))\n(6, 'C', 'A', 70, 'H', 'CODa', np.float64(2.07))\n(6, 'C', 'A', 72, 'H', 'CODa', np.float64(1.86))\n(7, 'C', 'A', 68, 'H', 'CODa', np.float64(1.99))\n(8, 'C', 'A', 60, 'C', 'CODa', np.float64(2.06))\n(8, 'C', 'A', 72, 'H', 'CODa', np.float64(1.17))\n(12, 'N', 'A', 95, 'Ir', 'Ir', np.float64(2.14))\n(13, 'C', 'A', 94, 'Ir', 'Ir', np.float64(2.05))\n(14, 'H', 'A', 73, 'H', 'CODa', np.float64(1.17))\n(21, 'H', 'A', 70, 'H', 'CODa', np.float64(1.71))\n(22, 'H', 'A', 68, 'H', 'CODa', np.float64(2.02))\n(23, 'H', 'A', 68, 'H', 'CODa', np.float64(1.67))\n(26, 'H', 'A', 86, 'H', 'CODb', np.float64(1.72))\n(27, 'C', 'B', 93, 'H', 'CODb', np.float64(1.98))\n(28, 'C', 'B', 80, 'C', 'CODb', np.float64(1.9))\n(28, 'C', 'B', 92, 'H', 'CODb', np.float64(0.97))\n(29, 'C', 'B', 80, 'C', 'CODb', np.float64(2.14))\n(29, 'C', 'B', 92, 'H', 'CODb', np.float64(1.58))\n(30, 'C', 'B', 90, 'H', 'CODb', np.float64(1.81))\n(30, 'C', 'B', 92, 'H', 'CODb', np.float64(2.16))\n(32, 'C', 'B', 90, 'H', 'CODb', np.float64(1.35))\n(33, 'C', 'B', 90, 'H', 'CODb', np.float64(2.07))\n(33, 'C', 'B', 92, 'H', 'CODb', np.float64(1.86))\n(34, 'C', 'B', 88, 'H', 'CODb', np.float64(1.99))\n(35, 'C', 'B', 80, 'C', 'CODb', np.float64(2.06))\n(35, 'C', 'B', 92, 'H', 'CODb', np.float64(1.17))\n(39, 'N', 'B', 94, 'Ir', 'Ir', np.float64(2.14))\n(40, 'C', 'B', 95, 'Ir', 'Ir', np.float64(2.05))\n(41, 'H', 'B', 93, 'H', 'CODb', np.float64(1.17))\n(48, 'H', 'B', 90, 'H', 'CODb', np.float64(1.71))\n(49, 'H', 'B', 88, 'H', 'CODb', np.float64(2.02))\n(50, 'H', 'B', 88, 'H', 'CODb', np.float64(1.67))\n(53, 'H', 'B', 66, 'H', 'CODa', np.float64(1.72))\n",
+  "name": "bash_kernel",
+  "tool_call_id": "toolu_bdrk_01DebNhVSCSaxk1jMzuxUVw2"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat << 'EOF' > build5.py\nimport numpy as np, json, itertools\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem, rdMolTransforms\nfrom scipy.spatial.distance import cdist, pdist, squareform\n\ndef frame(e1,e3raw):\n    e1=e1/np.linalg.norm(e1); e3=e3raw-np.dot(e3raw,e1)*e1; e3/=np.linalg.norm(e3)\n    return np.array([e1,np.cross(e3,e1),e3]).T\ndef rotmat(axis,ang):\n    axis=axis/np.linalg.norm(axis); K=np.array([[0,-axis[2],axis[1]],[axis[2],0,-axis[0]],[-axis[1],axis[0],0]])\n    return np.eye(3)+np.sin(ang)*K+(1-np.cos(ang))*K@K\n\ndef hexcore(aIr=88.0,aC=136.0,aN=136.0,dIrC=2.05,dCN=1.37,dNIr=2.10):\n    pts=[];p=np.array([0.0,0.0]);th=0.0\n    for L,ang in [(dIrC,aC),(dCN,aN),(dNIr,aIr),(dIrC,aC),(dCN,aN),(dNIr,aIr)]:\n        pts.append(p.copy()); p=p+L*np.array([np.cos(np.radians(th)),np.sin(np.radians(th))]); th+=180-ang\n    return np.array(pts)\npts=hexcore(); pts-=0.5*(pts[0]+pts[3])\nv=pts[3]-pts[0]; a=np.arctan2(v[1],v[0])\nR2=np.array([[np.cos(-a),-np.sin(-a)],[np.sin(-a),np.cos(-a)]]); pts=(R2@pts.T).T\nP3=np.c_[pts,np.zeros(6)]\nIr1,CA,NA,Ir2,CB,NB=P3\nRz=np.diag([-1.0,-1.0,1.0])\n\nlig=Chem.AddHs(Chem.MolFromSmiles(\"Cc1cc(C)cc(C)c1n1ccnc1\"))\nAllChem.EmbedMolecule(lig,randomSeed=11); AllChem.MMFFOptimizeMolecule(lig,maxIters=5000)\nimid=[list(r) for r in lig.GetRingInfo().AtomRings() if len(r)==5][0]\nNs=[i for i in imid if lig.GetAtomWithIdx(i).GetSymbol()=='N']\nC2=[i for i in imid if lig.GetAtomWithIdx(i).GetSymbol()=='C' and all(n in [x.GetIdx() for x in lig.GetAtomWithIdx(i).GetNeighbors()] for n in Ns)][0]\nN1=[i for i in Ns if sum(1 for x in lig.GetAtomWithIdx(i).GetNeighbors() if x.GetIdx() not in imid)==1][0]\nN3=[i for i in Ns if i!=N1][0]\nCipso=[x.GetIdx() for x in lig.GetAtomWithIdx(N1).GetNeighbors() if x.GetIdx() not in imid][0]\nCortho=[x.GetIdx() for x in lig.GetAtomWithIdx(Cipso).GetNeighbors() if x.GetIdx()!=N1][0]\nconf=lig.GetConformer()\nHc2=[x.GetIdx() for x in lig.GetAtomWithIdx(C2).GetNeighbors() if x.GetSymbol()=='H'][0]\nkeep=[i for i in range(lig.GetNumAtoms()) if i!=Hc2]\nlsym=[lig.GetAtomWithIdx(i).GetSymbol() for i in keep]\nidx={o:n for n,o in enumerate(keep)}\nC2k,N1k,N3k=idx[C2],idx[N1],idx[N3]; ringk=[idx[i] for i in imid]\n\ndef lig_coords(dih,beta):\n    rdMolTransforms.SetDihedralDeg(conf,C2,N1,Cipso,Cortho,dih)\n    LP=np.array(conf.GetPositions())[keep]\n    rp=LP[ringk]; nrm=np.linalg.svd(rp-rp.mean(0))[2][2]\n    Fs=frame(LP[N3k]-LP[C2k],nrm)\n    R=frame(NA-CA,np.array([0,0,1.0]))@Fs.T\n    X=(R@(LP-LP[C2k]).T).T+CA\n    mid=0.5*(CA+NA); out=mid/np.linalg.norm(mid)\n    if np.dot(X[ringk].mean(0)-mid,out)<0:\n        e1=(NA-CA)/np.linalg.norm(NA-CA)\n        X=((2*np.outer(e1,e1)-np.eye(3))@(X-CA).T).T+CA\n    Rb=rotmat(NA-CA,np.radians(beta))\n    X=(Rb@(X-CA).T).T+CA\n    return X\n\ncod=Chem.AddHs(Chem.MolFromSmiles(\"C1CC=CCCC=C1\"))\nAllChem.EmbedMolecule(cod,randomSeed=5); AllChem.MMFFOptimizeMolecule(cod,maxIters=5000)\nCP=np.array(cod.GetConformer().GetPositions()); csym=[a.GetSymbol() for a in cod.GetAtoms()]\ndb=[b for b in cod.GetBonds() if b.GetBondType()==Chem.BondType.DOUBLE]\na1=[db[0].GetBeginAtomIdx(),db[0].GetEndAtomIdx()]; a2=[db[1].GetBeginAtomIdx(),db[1].GetEndAtomIdx()]\nM1s=CP[a1].mean(0); M2s=CP[a2].mean(0); Mm=0.5*(M1s+M2s)\nb1=CP[a1[1]]-CP[a1[0]]; b2=CP[a2[1]]-CP[a2[0]]\nif np.dot(b1,b2)<0: b2=-b2\nFsc=frame(M2s-M1s,b1+b2)\ndA=-(CA-Ir1); dB=-(NB-Ir1); dA/=np.linalg.norm(dA); dB/=np.linalg.norm(dB)\ndef cod_coords(R,psi,flip,swap):\n    M1=Ir1+R*dA; M2=Ir1+R*dB\n    if swap: M1,M2=M2,M1\n    Mt=0.5*(M1+M2); e1=M2-M1; out=Mt-Ir1; nz=np.cross(e1,out)\n    if flip: nz=-nz\n    Rr=frame(e1,nz)@Fsc.T\n    X=(Rr@(CP-Mm).T).T+Mt\n    X=(rotmat(out,np.radians(psi))@(X-Ir1).T).T+Ir1\n    return X\n\nnl=len(lsym); nc=len(csym)\nsyms=lsym+lsym+csym+csym+['Ir','Ir']\ndef assemble(dih,beta,R,psi,flip,swap):\n    LA=lig_coords(dih,beta); CODa=cod_coords(R,psi,flip,swap)\n    return np.vstack([LA,(Rz@LA.T).T,CODa,(Rz@CODa.T).T,Ir1[None,:],Ir2[None,:]])\nrad={'C':1.7,'N':1.55,'H':1.2,'Ir':1.9}\nrv=np.array([rad[s] for s in syms])\ngrps=[(0,nl),(nl,2*nl),(2*nl,2*nl+nc),(2*nl+nc,2*nl+2*nc),(2*nl+2*nc,2*nl+2*nc+2)]\ndef score(X):\n    s=0.0\n    for g1,g2 in itertools.combinations(range(5),2):\n        A=slice(*grps[g1]); B=slice(*grps[g2])\n        D=cdist(X[A],X[B]); lim=0.82*(rv[A][:,None]+rv[B][None,:])\n        if g1==4 or g2==4: lim*=0.72\n        s+=(np.clip(lim-D,0,None)**2).sum()\n    return s\nbest=None\nfor dih in range(0,180,15):\n  for beta in range(-60,61,15):\n    for R in [2.10,2.25,2.40]:\n      for psi in range(0,360,15):\n        for flip in [False,True]:\n          for swap in [False,True]:\n            X=assemble(dih,beta,R,psi,flip,swap); s=score(X)\n            if best is None or s<best[0]: best=(s,dih,beta,R,psi,flip,swap)\nprint(\"best\",best)\ns,dih,beta,R,psi,flip,swap=best\nX=assemble(dih,beta,R,psi,flip,swap)\nwith open('start.xyz','w') as f:\n    f.write(f\"{len(syms)}\\nstart s=%.3f\\n\"%s)\n    for sy,p in zip(syms,X): f.write(f\"{sy} {p[0]:.4f} {p[1]:.4f} {p[2]:.4f}\\n\")\noff=dict(A=0,B=nl,CODa=2*nl,CODb=2*nl+nc,Ir1=2*nl+2*nc,Ir2=2*nl+2*nc+1)\njson.dump(dict(nl=nl,nc=nc,C2k=C2k,N3k=N3k,N1k=N1k,ring=ringk,a1=a1,a2=a2,off=off),open('info.json','w'))\nD=squareform(pdist(X)); np.fill_diagonal(D,9)\ndef grp(i):\n    for k,(lo,hi) in zip(['A','B','CODa','CODb','Ir'],grps):\n        if lo<=i<hi: return k\nbad=[(i,syms[i],grp(i),j,syms[j],grp(j),round(D[i,j],2)) for i in range(len(syms)) for j in range(i+1,len(syms)) if D[i,j]<2.2 and grp(i)!=grp(j)]\nfor b in bad: print(b)\nEOF\npython build5.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 24414,
+   "output_tokens": 5333,
+   "total_tokens": 29747,
+   "input_token_details": {
+    "cache_creation": 0,
+    "cache_read": 19220,
+    "ephemeral_5m_input_tokens": 5192,
+    "ephemeral_1h_input_tokens": 0
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "best (np.float64(18.508456825167194), 90, 0, 2.4, 120, True, True)\n(0, 'C', 'A', 68, 'H', 'CODa', np.float64(1.67))\n(1, 'C', 'A', 68, 'H', 'CODa', np.float64(1.47))\n(2, 'C', 'A', 70, 'H', 'CODa', np.float64(1.47))\n(3, 'C', 'A', 70, 'H', 'CODa', np.float64(1.18))\n(5, 'C', 'A', 70, 'H', 'CODa', np.float64(1.82))\n(5, 'C', 'A', 72, 'H', 'CODa', np.float64(1.67))\n(6, 'C', 'A', 60, 'C', 'CODa', np.float64(2.01))\n(6, 'C', 'A', 72, 'H', 'CODa', np.float64(0.99))\n(7, 'C', 'A', 72, 'H', 'CODa', np.float64(1.75))\n(8, 'C', 'A', 68, 'H', 'CODa', np.float64(2.15))\n(8, 'C', 'A', 72, 'H', 'CODa', np.float64(1.85))\n(12, 'N', 'A', 95, 'Ir', 'Ir', np.float64(2.14))\n(13, 'C', 'A', 94, 'Ir', 'Ir', np.float64(2.05))\n(15, 'H', 'A', 68, 'H', 'CODa', np.float64(2.0))\n(15, 'H', 'A', 69, 'H', 'CODa', np.float64(2.2))\n(16, 'H', 'A', 68, 'H', 'CODa', np.float64(1.66))\n(24, 'H', 'A', 72, 'H', 'CODa', np.float64(1.84))\n(24, 'H', 'A', 73, 'H', 'CODa', np.float64(1.86))\n(27, 'C', 'B', 88, 'H', 'CODb', np.float64(1.67))\n(28, 'C', 'B', 88, 'H', 'CODb', np.float64(1.47))\n(29, 'C', 'B', 90, 'H', 'CODb', np.float64(1.47))\n(30, 'C', 'B', 90, 'H', 'CODb', np.float64(1.18))\n(32, 'C', 'B', 90, 'H', 'CODb', np.float64(1.82))\n(32, 'C', 'B', 92, 'H', 'CODb', np.float64(1.67))\n(33, 'C', 'B', 80, 'C', 'CODb', np.float64(2.01))\n(33, 'C', 'B', 92, 'H', 'CODb', np.float64(0.99))\n(34, 'C', 'B', 92, 'H', 'CODb', np.float64(1.75))\n(35, 'C', 'B', 88, 'H', 'CODb', np.float64(2.15))\n(35, 'C', 'B', 92, 'H', 'CODb', np.float64(1.85))\n(39, 'N', 'B', 94, 'Ir', 'Ir', np.float64(2.14))\n(40, 'C', 'B', 95, 'Ir', 'Ir', np.float64(2.05))\n(42, 'H', 'B', 88, 'H', 'CODb', np.float64(2.0))\n(42, 'H', 'B', 89, 'H', 'CODb', np.float64(2.2))\n(43, 'H', 'B', 88, 'H', 'CODb', np.float64(1.66))\n(51, 'H', 'B', 92, 'H', 'CODb', np.float64(1.84))\n(51, 'H', 'B', 93, 'H', 'CODb', np.float64(1.86))\n",
+  "name": "bash_kernel",
+  "tool_call_id": "toolu_bdrk_012hwQzK8TSCdq143dfjnH2r"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "sed -i 's/for R in \\[2.10,2.25,2.40\\]:/for R in [2.9,3.2,3.5]:/' build5.py\nsed -i 's/start s=/far s=/' build5.py\nsed -i \"s/open('start.xyz','w')/open('far.xyz','w')/\" build5.py\npython build5.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 29310,
+   "output_tokens": 1325,
+   "total_tokens": 30635,
+   "input_token_details": {
+    "cache_creation": 0,
+    "cache_read": 24412,
+    "ephemeral_5m_input_tokens": 4896,
+    "ephemeral_1h_input_tokens": 0
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "best (np.float64(10.624896459516446), 90, 0, 3.5, 105, True, True)\n(1, 'C', 'A', 68, 'H', 'CODa', np.float64(1.35))\n(2, 'C', 'A', 58, 'C', 'CODa', np.float64(2.11))\n(2, 'C', 'A', 68, 'H', 'CODa', np.float64(1.54))\n(2, 'C', 'A', 69, 'H', 'CODa', np.float64(2.01))\n(3, 'C', 'A', 70, 'H', 'CODa', np.float64(1.39))\n(4, 'C', 'A', 70, 'H', 'CODa', np.float64(1.82))\n(5, 'C', 'A', 70, 'H', 'CODa', np.float64(1.83))\n(5, 'C', 'A', 72, 'H', 'CODa', np.float64(1.87))\n(6, 'C', 'A', 72, 'H', 'CODa', np.float64(1.89))\n(8, 'C', 'A', 68, 'H', 'CODa', np.float64(2.06))\n(12, 'N', 'A', 95, 'Ir', 'Ir', np.float64(2.14))\n(13, 'C', 'A', 94, 'Ir', 'Ir', np.float64(2.05))\n(17, 'H', 'A', 68, 'H', 'CODa', np.float64(2.19))\n(17, 'H', 'A', 69, 'H', 'CODa', np.float64(1.83))\n(18, 'H', 'A', 70, 'H', 'CODa', np.float64(1.83))\n(21, 'H', 'A', 72, 'H', 'CODa', np.float64(2.03))\n(24, 'H', 'A', 72, 'H', 'CODa', np.float64(2.07))\n(28, 'C', 'B', 88, 'H', 'CODb', np.float64(1.35))\n(29, 'C', 'B', 78, 'C', 'CODb', np.float64(2.11))\n(29, 'C', 'B', 88, 'H', 'CODb', np.float64(1.54))\n(29, 'C', 'B', 89, 'H', 'CODb', np.float64(2.01))\n(30, 'C', 'B', 90, 'H', 'CODb', np.float64(1.39))\n(31, 'C', 'B', 90, 'H', 'CODb', np.float64(1.82))\n(32, 'C', 'B', 90, 'H', 'CODb', np.float64(1.83))\n(32, 'C', 'B', 92, 'H', 'CODb', np.float64(1.87))\n(33, 'C', 'B', 92, 'H', 'CODb', np.float64(1.89))\n(35, 'C', 'B', 88, 'H', 'CODb', np.float64(2.06))\n(39, 'N', 'B', 94, 'Ir', 'Ir', np.float64(2.14))\n(40, 'C', 'B', 95, 'Ir', 'Ir', np.float64(2.05))\n(44, 'H', 'B', 88, 'H', 'CODb', np.float64(2.19))\n(44, 'H', 'B', 89, 'H', 'CODb', np.float64(1.83))\n(45, 'H', 'B', 90, 'H', 'CODb', np.float64(1.83))\n(48, 'H', 'B', 92, 'H', 'CODb', np.float64(2.03))\n(51, 'H', 'B', 92, 'H', 'CODb', np.float64(2.07))\n",
+  "name": "bash_kernel",
+  "tool_call_id": "toolu_bdrk_012FCuQUrDdh8iFX6fP2BxHN"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "view_molecule",
+    "args": {
+     "xyz_file_relative_path": "far.xyz",
+     "left_right_deg": 0,
+     "up_down_deg": 0,
+     "reset_view": true
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 30674,
+   "output_tokens": 1548,
+   "total_tokens": 32222,
+   "input_token_details": {
+    "cache_creation": 0,
+    "cache_read": 29308,
+    "ephemeral_5m_input_tokens": 1364,
+    "ephemeral_1h_input_tokens": 0
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[image]",
+  "name": "view_molecule",
+  "tool_call_id": "toolu_bdrk_01PJjvW1kPgWWQjdYbUDDSFL"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat << 'EOF' > build6.py\nimport numpy as np, json, itertools\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem, rdMolTransforms\nfrom scipy.spatial.distance import cdist, pdist, squareform\nfrom scipy.optimize import minimize\n\ndef frame(e1,e3raw):\n    e1=e1/np.linalg.norm(e1); e3=e3raw-np.dot(e3raw,e1)*e1; e3/=np.linalg.norm(e3)\n    return np.array([e1,np.cross(e3,e1),e3]).T\ndef rotmat(axis,ang):\n    axis=np.asarray(axis,float); axis=axis/np.linalg.norm(axis)\n    K=np.array([[0,-axis[2],axis[1]],[axis[2],0,-axis[0]],[-axis[1],axis[0],0]])\n    return np.eye(3)+np.sin(ang)*K+(1-np.cos(ang))*K@K\n\ndef hexcore(aIr=88.0,aC=136.0,aN=136.0,dIrC=2.05,dCN=1.37,dNIr=2.10):\n    pts=[];p=np.array([0.0,0.0]);th=0.0\n    for L,ang in [(dIrC,aC),(dCN,aN),(dNIr,aIr),(dIrC,aC),(dCN,aN),(dNIr,aIr)]:\n        pts.append(p.copy()); p=p+L*np.array([np.cos(np.radians(th)),np.sin(np.radians(th))]); th+=180-ang\n    return np.array(pts)\npts=hexcore(); pts-=0.5*(pts[0]+pts[3])\nv=pts[3]-pts[0]; a=np.arctan2(v[1],v[0])\nR2=np.array([[np.cos(-a),-np.sin(-a)],[np.sin(-a),np.cos(-a)]]); pts=(R2@pts.T).T\nP3=np.c_[pts,np.zeros(6)]\nIr1,CA,NA,Ir2,CB,NB=P3\nRz=np.diag([-1.0,-1.0,1.0])\n\nlig=Chem.AddHs(Chem.MolFromSmiles(\"Cc1cc(C)cc(C)c1n1ccnc1\"))\nAllChem.EmbedMolecule(lig,randomSeed=11); AllChem.MMFFOptimizeMolecule(lig,maxIters=5000)\nimid=[list(r) for r in lig.GetRingInfo().AtomRings() if len(r)==5][0]\nNs=[i for i in imid if lig.GetAtomWithIdx(i).GetSymbol()=='N']\nC2=[i for i in imid if lig.GetAtomWithIdx(i).GetSymbol()=='C' and all(n in [x.GetIdx() for x in lig.GetAtomWithIdx(i).GetNeighbors()] for n in Ns)][0]\nN1=[i for i in Ns if sum(1 for x in lig.GetAtomWithIdx(i).GetNeighbors() if x.GetIdx() not in imid)==1][0]\nN3=[i for i in Ns if i!=N1][0]\nCipso=[x.GetIdx() for x in lig.GetAtomWithIdx(N1).GetNeighbors() if x.GetIdx() not in imid][0]\nCortho=[x.GetIdx() for x in lig.GetAtomWithIdx(Cipso).GetNeighbors() if x.GetIdx()!=N1][0]\nconf=lig.GetConformer()\nHc2=[x.GetIdx() for x in lig.GetAtomWithIdx(C2).GetNeighbors() if x.GetSymbol()=='H'][0]\nkeep=[i for i in range(lig.GetNumAtoms()) if i!=Hc2]\nlsym=[lig.GetAtomWithIdx(i).GetSymbol() for i in keep]\nidx={o:n for n,o in enumerate(keep)}\nC2k,N1k,N3k=idx[C2],idx[N1],idx[N3]; ringk=[idx[i] for i in imid]\nLPcache={}\ndef lig_coords(dih,beta):\n    key=round(dih,2)\n    if key not in LPcache:\n        rdMolTransforms.SetDihedralDeg(conf,C2,N1,Cipso,Cortho,float(dih))\n        LP=np.array(conf.GetPositions())[keep]\n        rp=LP[ringk]; nrm=np.linalg.svd(rp-rp.mean(0))[2][2]\n        Fs=frame(LP[N3k]-LP[C2k],nrm)\n        R=frame(NA-CA,np.array([0,0,1.0]))@Fs.T\n        X=(R@(LP-LP[C2k]).T).T+CA\n        mid=0.5*(CA+NA); out=mid/np.linalg.norm(mid)\n        if np.dot(X[ringk].mean(0)-mid,out)<0:\n            e1=(NA-CA)/np.linalg.norm(NA-CA)\n            X=((2*np.outer(e1,e1)-np.eye(3))@(X-CA).T).T+CA\n        LPcache[key]=X\n    X=LPcache[key]\n    return (rotmat(NA-CA,np.radians(beta))@(X-CA).T).T+CA\n\ncod=Chem.AddHs(Chem.MolFromSmiles(\"C1CC=CCCC=C1\"))\nAllChem.EmbedMolecule(cod,randomSeed=5); AllChem.MMFFOptimizeMolecule(cod,maxIters=5000)\nCP=np.array(cod.GetConformer().GetPositions()); csym=[a.GetSymbol() for a in cod.GetAtoms()]\ndb=[b for b in cod.GetBonds() if b.GetBondType()==Chem.BondType.DOUBLE]\na1=[db[0].GetBeginAtomIdx(),db[0].GetEndAtomIdx()]; a2=[db[1].GetBeginAtomIdx(),db[1].GetEndAtomIdx()]\nM1s=CP[a1].mean(0); M2s=CP[a2].mean(0); Mm=0.5*(M1s+M2s)\nb1=CP[a1[1]]-CP[a1[0]]; b2=CP[a2[1]]-CP[a2[0]]\nif np.dot(b1,b2)<0: b2=-b2\nFsc=frame(M2s-M1s,b1+b2)\ndAv=-(CA-Ir1); dBv=-(NB-Ir1); dAv/=np.linalg.norm(dAv); dBv/=np.linalg.norm(dBv)\ndef cod_coords(R,psi,flip,swap,tilt=0.0,tilt2=0.0):\n    M1=Ir1+R*dAv; M2=Ir1+R*dBv\n    if swap: M1,M2=M2,M1\n    Mt=0.5*(M1+M2); e1=M2-M1; out=Mt-Ir1; nz=np.cross(e1,out)\n    if flip: nz=-nz\n    Rr=frame(e1,nz)@Fsc.T\n    X=(Rr@(CP-Mm).T).T+Mt\n    X=(rotmat(out,np.radians(psi))@(X-Ir1).T).T+Ir1\n    X=(rotmat(e1,np.radians(tilt))@(X-Mt).T).T+Mt\n    X=(rotmat(np.cross(e1,out),np.radians(tilt2))@(X-Mt).T).T+Mt\n    return X\n\nnl=len(lsym); nc=len(csym)\nsyms=lsym+lsym+csym+csym+['Ir','Ir']\ngrps=[(0,nl),(nl,2*nl),(2*nl,2*nl+nc),(2*nl+nc,2*nl+2*nc),(2*nl+2*nc,2*nl+2*nc+2)]\nrad={'C':1.75,'N':1.6,'H':1.25,'Ir':2.0}\nrv=np.array([rad[s] for s in syms])\ndef assemble(p,flip,swap):\n    dih,beta,R,psi,tilt,tilt2=p\n    LA=lig_coords(dih,beta); CODa=cod_coords(R,psi,flip,swap,tilt,tilt2)\n    return np.vstack([LA,(Rz@LA.T).T,CODa,(Rz@CODa.T).T,Ir1[None,:],Ir2[None,:]])\ndef clash(X):\n    s=0.0\n    for g1,g2 in itertools.combinations(range(5),2):\n        A=slice(*grps[g1]); B=slice(*grps[g2])\n        D=cdist(X[A],X[B]); lim=(rv[A][:,None]+rv[B][None,:])*0.95\n        if g1==4 or g2==4: lim*=0.62\n        s+=(np.clip(lim-D,0,None)**2).sum()\n    return s\ndef cost(p,flip,swap):\n    X=assemble(p,flip,swap)\n    pen=100*max(0,p[2]-2.20)**2 + 100*max(0,2.05-p[2])**2\n    pen+= 0.002*(p[4]**2+p[5]**2)\n    return clash(X)+pen\nbest=None\nrng=np.random.default_rng(0)\nfor flip in [False,True]:\n for swap in [False,True]:\n  for trial in range(40):\n    p0=np.array([rng.uniform(0,360),rng.uniform(-50,50),2.15,rng.uniform(0,360),rng.uniform(-25,25),rng.uniform(-25,25)])\n    r=minimize(cost,p0,args=(flip,swap),method='Powell',options=dict(maxiter=20000,xtol=1e-3,ftol=1e-4))\n    if best is None or r.fun<best[0]: best=(r.fun,r.x.copy(),flip,swap)\nprint(\"best cost\",best[0],best[1],best[2],best[3])\nf,p,flip,swap=best\nX=assemble(p,flip,swap)\nwith open('start.xyz','w') as fh:\n    fh.write(f\"{len(syms)}\\nstart\\n\")\n    for sy,q in zip(syms,X): fh.write(f\"{sy} {q[0]:.4f} {q[1]:.4f} {q[2]:.4f}\\n\")\noff=dict(A=0,B=nl,CODa=2*nl,CODb=2*nl+nc,Ir1=2*nl+2*nc,Ir2=2*nl+2*nc+1)\njson.dump(dict(nl=nl,nc=nc,C2k=C2k,N3k=N3k,N1k=N1k,ring=ringk,a1=a1,a2=a2,off=off,\n  params=list(p),flip=bool(flip),swap=bool(swap)),open('info.json','w'))\nD=squareform(pdist(X)); np.fill_diagonal(D,9)\ndef grp(i):\n    for k,(lo,hi) in zip(['A','B','CODa','CODb','Ir'],grps):\n        if lo<=i<hi: return k\nbad=[(i,syms[i],grp(i),j,syms[j],grp(j),round(D[i,j],2)) for i in range(len(syms)) for j in range(i+1,len(syms)) if D[i,j]<2.1 and grp(i)!=grp(j)]\nfor b in bad: print(b)\nprint(\"nbad\",len(bad))\nEOF\npython build6.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 32127,
+   "output_tokens": 5635,
+   "total_tokens": 37762,
+   "input_token_details": {
+    "cache_creation": 0,
+    "cache_read": 30672,
+    "ephemeral_5m_input_tokens": 1453,
+    "ephemeral_1h_input_tokens": 0
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "best cost 25.45087035881209 [ 88.82517906  -3.4474826    2.31427571 292.16349555  -1.49338054\n -37.59148778] True True\n(1, 'C', 'A', 62, 'H', 'CODa', np.float64(1.84))\n(2, 'C', 'A', 62, 'H', 'CODa', np.float64(1.62))\n(5, 'C', 'A', 66, 'H', 'CODa', np.float64(1.83))\n(12, 'N', 'A', 88, 'H', 'CODb', np.float64(2.02))\n(13, 'C', 'A', 94, 'Ir', 'Ir', np.float64(2.05))\n(16, 'H', 'A', 73, 'H', 'CODa', np.float64(2.05))\n(17, 'H', 'A', 62, 'H', 'CODa', np.float64(2.03))\n(21, 'H', 'A', 66, 'H', 'CODa', np.float64(1.97))\n(24, 'H', 'A', 67, 'H', 'CODa', np.float64(1.82))\n(26, 'H', 'A', 90, 'H', 'CODb', np.float64(1.29))\n(28, 'C', 'B', 82, 'H', 'CODb', np.float64(1.84))\n(29, 'C', 'B', 82, 'H', 'CODb', np.float64(1.62))\n(32, 'C', 'B', 86, 'H', 'CODb', np.float64(1.83))\n(39, 'N', 'B', 68, 'H', 'CODa', np.float64(2.02))\n(40, 'C', 'B', 95, 'Ir', 'Ir', np.float64(2.05))\n(43, 'H', 'B', 93, 'H', 'CODb', np.float64(2.05))\n(44, 'H', 'B', 82, 'H', 'CODb', np.float64(2.03))\n(48, 'H', 'B', 86, 'H', 'CODb', np.float64(1.97))\n(51, 'H', 'B', 87, 'H', 'CODb', np.float64(1.82))\n(53, 'H', 'B', 70, 'H', 'CODa', np.float64(1.29))\n(58, 'C', 'CODa', 94, 'Ir', 'Ir', np.float64(2.1))\n(60, 'C', 'CODa', 94, 'Ir', 'Ir', np.float64(1.93))\n(68, 'H', 'CODa', 94, 'Ir', 'Ir', np.float64(1.79))\n(78, 'C', 'CODb', 95, 'Ir', 'Ir', np.float64(2.1))\n(80, 'C', 'CODb', 95, 'Ir', 'Ir', np.float64(1.93))\n(88, 'H', 'CODb', 95, 'Ir', 'Ir', np.float64(1.79))\nnbad 26\n",
+  "name": "bash_kernel",
+  "tool_call_id": "toolu_bdrk_01LpyZtWYafNP4ZKztv5ufdc"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat << 'EOF' > build7.py\nimport numpy as np, json, itertools\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem, rdMolTransforms\nfrom scipy.spatial.distance import cdist, pdist, squareform\nfrom scipy.optimize import minimize\n\ndef frame(e1,e3raw):\n    e1=e1/np.linalg.norm(e1); e3=e3raw-np.dot(e3raw,e1)*e1; e3/=np.linalg.norm(e3)\n    return np.array([e1,np.cross(e3,e1),e3]).T\ndef rotmat(axis,ang):\n    axis=np.asarray(axis,float); axis=axis/np.linalg.norm(axis)\n    K=np.array([[0,-axis[2],axis[1]],[axis[2],0,-axis[0]],[-axis[1],axis[0],0]])\n    return np.eye(3)+np.sin(ang)*K+(1-np.cos(ang))*K@K\n\ndef hexcore(aIr=88.0,aC=136.0,aN=136.0,dIrC=2.05,dCN=1.37,dNIr=2.10):\n    pts=[];p=np.array([0.0,0.0]);th=0.0\n    for L,ang in [(dIrC,aC),(dCN,aN),(dNIr,aIr),(dIrC,aC),(dCN,aN),(dNIr,aIr)]:\n        pts.append(p.copy()); p=p+L*np.array([np.cos(np.radians(th)),np.sin(np.radians(th))]); th+=180-ang\n    return np.array(pts)\npts=hexcore(); pts-=0.5*(pts[0]+pts[3])\nv=pts[3]-pts[0]; a=np.arctan2(v[1],v[0])\nR2=np.array([[np.cos(-a),-np.sin(-a)],[np.sin(-a),np.cos(-a)]]); pts=(R2@pts.T).T\nP3=np.c_[pts,np.zeros(6)]\nIr1,CA,NA,Ir2,CB,NB=P3\nRz=np.diag([-1.0,-1.0,1.0])\n\n# ------- ligand -------\nlig=Chem.AddHs(Chem.MolFromSmiles(\"Cc1cc(C)cc(C)c1n1ccnc1\"))\nAllChem.EmbedMolecule(lig,randomSeed=11); AllChem.MMFFOptimizeMolecule(lig,maxIters=5000)\nimid=[list(r) for r in lig.GetRingInfo().AtomRings() if len(r)==5][0]\nNs=[i for i in imid if lig.GetAtomWithIdx(i).GetSymbol()=='N']\nC2=[i for i in imid if lig.GetAtomWithIdx(i).GetSymbol()=='C' and all(n in [x.GetIdx() for x in lig.GetAtomWithIdx(i).GetNeighbors()] for n in Ns)][0]\nN1=[i for i in Ns if sum(1 for x in lig.GetAtomWithIdx(i).GetNeighbors() if x.GetIdx() not in imid)==1][0]\nN3=[i for i in Ns if i!=N1][0]\nCipso=[x.GetIdx() for x in lig.GetAtomWithIdx(N1).GetNeighbors() if x.GetIdx() not in imid][0]\nCortho=[x.GetIdx() for x in lig.GetAtomWithIdx(Cipso).GetNeighbors() if x.GetIdx()!=N1][0]\nconf=lig.GetConformer()\nHc2=[x.GetIdx() for x in lig.GetAtomWithIdx(C2).GetNeighbors() if x.GetSymbol()=='H'][0]\nkeep=[i for i in range(lig.GetNumAtoms()) if i!=Hc2]\nlsym=[lig.GetAtomWithIdx(i).GetSymbol() for i in keep]\nidx={o:n for n,o in enumerate(keep)}\nC2k,N1k,N3k=idx[C2],idx[N1],idx[N3]; ringk=[idx[i] for i in imid]\ncache={}\ndef lig_coords(dih,beta=0.0):\n    k=round(float(dih),1)\n    if k not in cache:\n        rdMolTransforms.SetDihedralDeg(conf,C2,N1,Cipso,Cortho,float(dih))\n        LP=np.array(conf.GetPositions())[keep]\n        rp=LP[ringk]; nrm=np.linalg.svd(rp-rp.mean(0))[2][2]\n        Fs=frame(LP[N3k]-LP[C2k],nrm)\n        R=frame(NA-CA,np.array([0,0,1.0]))@Fs.T\n        X=(R@(LP-LP[C2k]).T).T+CA\n        mid=0.5*(CA+NA); out=mid/np.linalg.norm(mid)\n        if np.dot(X[ringk].mean(0)-mid,out)<0:\n            e1=(NA-CA)/np.linalg.norm(NA-CA)\n            X=((2*np.outer(e1,e1)-np.eye(3))@(X-CA).T).T+CA\n        cache[k]=X\n    return (rotmat(NA-CA,np.radians(beta))@(cache[k]-CA).T).T+CA\n\n# ------- COD -------\ncod=Chem.AddHs(Chem.MolFromSmiles(\"C1CC=CCCC=C1\"))\nAllChem.EmbedMolecule(cod,randomSeed=5); AllChem.MMFFOptimizeMolecule(cod,maxIters=5000)\nCP=np.array(cod.GetConformer().GetPositions()); csym=[a.GetSymbol() for a in cod.GetAtoms()]\ndb=[b for b in cod.GetBonds() if b.GetBondType()==Chem.BondType.DOUBLE]\na1=[db[0].GetBeginAtomIdx(),db[0].GetEndAtomIdx()]; a2=[db[1].GetBeginAtomIdx(),db[1].GetEndAtomIdx()]\nM1s=CP[a1].mean(0); M2s=CP[a2].mean(0); Mm=0.5*(M1s+M2s); span=np.linalg.norm(M2s-M1s)\nb1=CP[a1[1]]-CP[a1[0]]; b2=CP[a2[1]]-CP[a2[0]]\nif np.dot(b1,b2)<0: b2=-b2\nch2=[i for i in range(cod.GetNumAtoms()) if csym[i]=='C' and i not in a1+a2]\nFsc=frame(M2s-M1s,b1+b2)\nprint(\"span\",span)\ndAv=-(CA-Ir1); dBv=-(NB-Ir1); dAv/=np.linalg.norm(dAv); dBv/=np.linalg.norm(dBv)\nu=(dAv+dBv); u/=np.linalg.norm(u)\nw=(dBv-dAv); w-=np.dot(w,u)*u; w/=np.linalg.norm(w)\ndef cod_coords(dIrM, s3, sw):\n    h=np.sqrt(max(dIrM**2-(span/2)**2,0.04))\n    Mt=Ir1+h*u\n    e1=w if not sw else -w\n    nz=np.array([0,0,1.0])*s3\n    Rr=frame(e1,nz)@Fsc.T\n    X=(Rr@(CP-Mm).T).T+Mt\n    return X\nnl=len(lsym); nc=len(csym)\nsyms=lsym+lsym+csym+csym+['Ir','Ir']\ngrps=[(0,nl),(nl,2*nl),(2*nl,2*nl+nc),(2*nl+nc,2*nl+2*nc),(2*nl+2*nc,2*nl+2*nc+2)]\nrad={'C':1.75,'N':1.6,'H':1.25,'Ir':2.0}\nrv=np.array([rad[s] for s in syms])\ndef clash(X,fac=0.95):\n    s=0.0\n    for g1,g2 in itertools.combinations(range(5),2):\n        A=slice(*grps[g1]); B=slice(*grps[g2])\n        D=cdist(X[A],X[B]); lim=(rv[A][:,None]+rv[B][None,:])*fac\n        if g1==4 or g2==4: lim*=0.60\n        s+=(np.clip(lim-D,0,None)**2).sum()\n    return s\nres=[]\nfor s3 in [1,-1]:\n for sw in [False,True]:\n  CODa=cod_coords(2.30,s3,sw)\n  # check CH2 point away from Ir\n  dch=np.linalg.norm(CODa[ch2].mean(0)-Ir1)\n  for dih in np.arange(0,180,5):\n    LA=lig_coords(dih)\n    X=np.vstack([LA,(Rz@LA.T).T,CODa,(Rz@CODa.T).T,Ir1[None,:],Ir2[None,:]])\n    res.append((clash(X),s3,sw,dih,dch))\nres.sort()\nprint(res[:8])\nbest=res[0]\nprint(\"chosen\",best)\ns3,sw,dih=best[1],best[2],best[3]\nCODa=cod_coords(2.30,s3,sw); LA=lig_coords(dih)\nX=np.vstack([LA,(Rz@LA.T).T,CODa,(Rz@CODa.T).T,Ir1[None,:],Ir2[None,:]])\nwith open('start.xyz','w') as fh:\n    fh.write(f\"{len(syms)}\\nstart\\n\")\n    for sy,q in zip(syms,X): fh.write(f\"{sy} {q[0]:.4f} {q[1]:.4f} {q[2]:.4f}\\n\")\noff=dict(A=0,B=nl,CODa=2*nl,CODb=2*nl+nc,Ir1=2*nl+2*nc,Ir2=2*nl+2*nc+1)\njson.dump(dict(nl=nl,nc=nc,C2k=C2k,N3k=N3k,N1k=N1k,ring=ringk,alk=a1+a2,off=off),open('info.json','w'))\nD=squareform(pdist(X)); np.fill_diagonal(D,9)\ndef grp(i):\n    for k,(lo,hi) in zip(['A','B','CODa','CODb','Ir'],grps):\n        if lo<=i<hi: return k\nbad=[(i,syms[i],grp(i),j,syms[j],grp(j),round(D[i,j],2)) for i in range(len(syms)) for j in range(i+1,len(syms)) if D[i,j]<2.1 and grp(i)!=grp(j)]\nfor b in bad: print(b)\nprint(\"alkene C-Ir dists:\",[round(np.linalg.norm(CODa[i]-Ir1),2) for i in a1+a2])\nEOF\npython build7.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 37137,
+   "output_tokens": 6444,
+   "total_tokens": 43581,
+   "input_token_details": {
+    "cache_creation": 0,
+    "cache_read": 32125,
+    "ephemeral_5m_input_tokens": 5010,
+    "ephemeral_1h_input_tokens": 0
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "span 3.213865060724261\n[(np.float64(69.04404980211393), -1, True, np.int64(95), np.float64(2.299536850972604)), (np.float64(69.04412202860884), 1, False, np.int64(95), np.float64(2.2995368509726037)), (np.float64(69.14409541378268), -1, True, np.int64(90), np.float64(2.299536850972604)), (np.float64(69.14419031688904), 1, False, np.int64(90), np.float64(2.2995368509726037)), (np.float64(71.03833349907082), -1, True, np.int64(100), np.float64(2.299536850972604)), (np.float64(71.03836842681639), 1, False, np.int64(100), np.float64(2.2995368509726037)), (np.float64(71.14058257003617), -1, True, np.int64(85), np.float64(2.299536850972604)), (np.float64(71.14068553354274), 1, False, np.int64(85), np.float64(2.2995368509726037))]\nchosen (np.float64(69.04404980211393), -1, True, np.int64(95), np.float64(2.299536850972604))\n(0, 'C', 'A', 66, 'H', 'CODa', np.float64(1.53))\n(1, 'C', 'A', 56, 'C', 'CODa', np.float64(1.74))\n(1, 'C', 'A', 66, 'H', 'CODa', np.float64(0.79))\n(2, 'C', 'A', 66, 'H', 'CODa', np.float64(1.65))\n(5, 'C', 'A', 67, 'H', 'CODa', np.float64(2.0))\n(6, 'C', 'A', 57, 'C', 'CODa', np.float64(1.86))\n(6, 'C', 'A', 67, 'H', 'CODa', np.float64(0.95))\n(7, 'C', 'A', 67, 'H', 'CODa', np.float64(1.89))\n(8, 'C', 'A', 56, 'C', 'CODa', np.float64(2.1))\n(8, 'C', 'A', 57, 'C', 'CODa', np.float64(1.9))\n(8, 'C', 'A', 66, 'H', 'CODa', np.float64(1.71))\n(8, 'C', 'A', 67, 'H', 'CODa', np.float64(1.25))\n(9, 'N', 'A', 67, 'H', 'CODa', np.float64(2.09))\n(13, 'C', 'A', 94, 'Ir', 'Ir', np.float64(2.05))\n(15, 'H', 'A', 66, 'H', 'CODa', np.float64(1.99))\n(16, 'H', 'A', 66, 'H', 'CODa', np.float64(1.91))\n(24, 'H', 'A', 67, 'H', 'CODa', np.float64(2.07))\n(26, 'H', 'A', 92, 'H', 'CODb', np.float64(2.08))\n(26, 'H', 'A', 93, 'H', 'CODb', np.float64(1.6))\n(27, 'C', 'B', 86, 'H', 'CODb', np.float64(1.53))\n(28, 'C', 'B', 76, 'C', 'CODb', np.float64(1.74))\n(28, 'C', 'B', 86, 'H', 'CODb', np.float64(0.79))\n(29, 'C', 'B', 86, 'H', 'CODb', np.float64(1.65))\n(32, 'C', 'B', 87, 'H', 'CODb', np.float64(2.0))\n(33, 'C', 'B', 77, 'C', 'CODb', np.float64(1.86))\n(33, 'C', 'B', 87, 'H', 'CODb', np.float64(0.95))\n(34, 'C', 'B', 87, 'H', 'CODb', np.float64(1.89))\n(35, 'C', 'B', 76, 'C', 'CODb', np.float64(2.1))\n(35, 'C', 'B', 77, 'C', 'CODb', np.float64(1.9))\n(35, 'C', 'B', 86, 'H', 'CODb', np.float64(1.71))\n(35, 'C', 'B', 87, 'H', 'CODb', np.float64(1.25))\n(36, 'N', 'B', 87, 'H', 'CODb', np.float64(2.09))\n(40, 'C', 'B', 95, 'Ir', 'Ir', np.float64(2.05))\n(42, 'H', 'B', 86, 'H', 'CODb', np.float64(1.99))\n(43, 'H', 'B', 86, 'H', 'CODb', np.float64(1.91))\n(51, 'H', 'B', 87, 'H', 'CODb', np.float64(2.07))\n(53, 'H', 'B', 72, 'H', 'CODa', np.float64(2.08))\n(53, 'H', 'B', 73, 'H', 'CODa', np.float64(1.6))\nalkene C-Ir dists: [np.float64(2.47), np.float64(2.32), np.float64(2.47), np.float64(2.32)]\n",
+  "name": "bash_kernel",
+  "tool_call_id": "toolu_bdrk_01DYMX2PBV7gTAd49wGwkrXJ"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python << 'EOF'\nimport numpy as np, json\nL=open('start.xyz').read().split('\\n'); n=int(L[0])\nsym=[];X=[]\nfor l in L[2:2+n]:\n    p=l.split(); sym.append(p[0]); X.append([float(x) for x in p[1:4]])\nX=np.array(X)\ninfo=json.load(open('info.json')); nl=info['nl']\nIr1=X[info['off']['Ir1']]; Ir2=X[info['off']['Ir2']]\nprint(\"Ir1\",Ir1,\"Ir2\",Ir2)\nfor i in range(nl):\n    print(i,sym[i],np.round(X[i],2), round(np.linalg.norm(X[i]-Ir1),2), round(np.linalg.norm(X[i]-Ir2),2))\nEOF"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 42730,
+   "output_tokens": 2588,
+   "total_tokens": 45318,
+   "input_token_details": {
+    "cache_creation": 0,
+    "cache_read": 37135,
+    "ephemeral_5m_input_tokens": 5593,
+    "ephemeral_1h_input_tokens": 0
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "Ir1 [-2.1777 -0.      0.    ] Ir2 [2.1777 0.     0.    ]\n0 C [-2.78 -2.8   2.55] 3.83 6.23\n1 C [-3.36 -3.12  1.19] 3.54 6.46\n2 C [-4.72 -3.48  1.15] 4.46 7.81\n3 C [-5.38 -3.71 -0.06] 4.9 8.42\n4 C [-6.82 -4.1  -0.07] 6.2 9.89\n5 C [-4.65 -3.63 -1.25] 4.57 7.83\n6 C [-3.28 -3.32 -1.25] 3.71 6.51\n7 C [-2.58 -3.34 -2.59] 4.25 6.37\n8 C [-2.63 -3.05 -0.02] 3.08 5.69\n9 N [-1.25 -2.7  -0.01] 2.86 4.37\n10 C [-0.18 -3.56  0.  ] 4.09 4.27\n11 C [ 0.94 -2.77  0.  ] 4.17 3.03\n12 N [ 0.6  -1.45  0.  ] 3.13 2.14\n13 C [-0.71 -1.44  0.  ] 2.05 3.23\n14 H [-2.25 -3.67  2.95] 4.71 6.46\n15 H [-3.57 -2.52  3.26] 4.35 7.07\n16 H [-2.1  -1.94  2.5 ] 3.16 5.32\n17 H [-5.28 -3.55  2.08] 5.16 8.52\n18 H [-7.31 -3.76 -0.99] 6.44 10.26\n19 H [-6.92 -5.19 -0.  ] 7.03 10.47\n20 H [-7.36 -3.65  0.77] 6.38 10.24\n21 H [-5.16 -3.84 -2.19] 5.33 8.57\n22 H [-3.13 -3.96 -3.31] 5.25 7.41\n23 H [-1.59 -3.79 -2.51] 4.58 5.9\n24 H [-2.51 -2.33 -3.  ] 3.82 6.04\n25 H [-0.29 -4.64 -0.04] 5.0 5.25\n26 H [ 1.98 -3.08 -0.01] 5.18 3.09\n",
+  "name": "bash_kernel",
+  "tool_call_id": "toolu_bdrk_01QeanhVx7aDZYGkmeUJhACs"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat << 'EOF' > build8.py\nimport numpy as np, json, itertools\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem, rdMolTransforms\nfrom scipy.spatial.distance import cdist, pdist, squareform\n\ndef frame(e1,e3raw):\n    e1=e1/np.linalg.norm(e1); e3=e3raw-np.dot(e3raw,e1)*e1; e3/=np.linalg.norm(e3)\n    return np.array([e1,np.cross(e3,e1),e3]).T\ndef rotmat(axis,ang):\n    axis=np.asarray(axis,float); axis=axis/np.linalg.norm(axis)\n    K=np.array([[0,-axis[2],axis[1]],[axis[2],0,-axis[0]],[-axis[1],axis[0],0]])\n    return np.eye(3)+np.sin(ang)*K+(1-np.cos(ang))*K@K\n\ndef hexcore(aIr=88.0,aC=136.0,aN=136.0,dIrC=2.05,dCN=1.37,dNIr=2.10):\n    pts=[];p=np.array([0.0,0.0]);th=0.0\n    for L,ang in [(dIrC,aC),(dCN,aN),(dNIr,aIr),(dIrC,aC),(dCN,aN),(dNIr,aIr)]:\n        pts.append(p.copy()); p=p+L*np.array([np.cos(np.radians(th)),np.sin(np.radians(th))]); th+=180-ang\n    return np.array(pts)\npts=hexcore(); pts-=0.5*(pts[0]+pts[3])\nv=pts[3]-pts[0]; a=np.arctan2(v[1],v[0])\nR2=np.array([[np.cos(-a),-np.sin(-a)],[np.sin(-a),np.cos(-a)]]); pts=(R2@pts.T).T\nP3=np.c_[pts,np.zeros(6)]\nIr1,CA,NA,Ir2,CB,NB=P3\nRz=np.diag([-1.0,-1.0,1.0])\n\nlig=Chem.AddHs(Chem.MolFromSmiles(\"Cc1cc(C)cc(C)c1n1ccnc1\"))\nAllChem.EmbedMolecule(lig,randomSeed=11); AllChem.MMFFOptimizeMolecule(lig,maxIters=5000)\nimid=[list(r) for r in lig.GetRingInfo().AtomRings() if len(r)==5][0]\nNs=[i for i in imid if lig.GetAtomWithIdx(i).GetSymbol()=='N']\nC2=[i for i in imid if lig.GetAtomWithIdx(i).GetSymbol()=='C' and all(n in [x.GetIdx() for x in lig.GetAtomWithIdx(i).GetNeighbors()] for n in Ns)][0]\nN1=[i for i in Ns if sum(1 for x in lig.GetAtomWithIdx(i).GetNeighbors() if x.GetIdx() not in imid)==1][0]\nN3=[i for i in Ns if i!=N1][0]\nCipso=[x.GetIdx() for x in lig.GetAtomWithIdx(N1).GetNeighbors() if x.GetIdx() not in imid][0]\nCortho=[x.GetIdx() for x in lig.GetAtomWithIdx(Cipso).GetNeighbors() if x.GetIdx()!=N1][0]\nconf=lig.GetConformer()\nHc2=[x.GetIdx() for x in lig.GetAtomWithIdx(C2).GetNeighbors() if x.GetSymbol()=='H'][0]\nkeep=[i for i in range(lig.GetNumAtoms()) if i!=Hc2]\nlsym=[lig.GetAtomWithIdx(i).GetSymbol() for i in keep]\nidx={o:n for n,o in enumerate(keep)}\nC2k,N1k,N3k=idx[C2],idx[N1],idx[N3]; ringk=[idx[i] for i in imid]\ndef lig_coords(dih):\n    rdMolTransforms.SetDihedralDeg(conf,C2,N1,Cipso,Cortho,float(dih))\n    LP=np.array(conf.GetPositions())[keep]\n    rp=LP[ringk]; nrm=np.linalg.svd(rp-rp.mean(0))[2][2]\n    Fs=frame(LP[N3k]-LP[C2k],nrm)\n    R=frame(NA-CA,np.array([0,0,1.0]))@Fs.T\n    X=(R@(LP-LP[C2k]).T).T+CA\n    mid=0.5*(CA+NA); out=mid/np.linalg.norm(mid)\n    if np.dot(X[ringk].mean(0)-mid,out)<0:\n        e1=(NA-CA)/np.linalg.norm(NA-CA)\n        X=((2*np.outer(e1,e1)-np.eye(3))@(X-CA).T).T+CA\n    return X\n\ncod=Chem.AddHs(Chem.MolFromSmiles(\"C1CC=CCCC=C1\"))\nAllChem.EmbedMolecule(cod,randomSeed=5); AllChem.MMFFOptimizeMolecule(cod,maxIters=5000)\nCP=np.array(cod.GetConformer().GetPositions()); csym=[a.GetSymbol() for a in cod.GetAtoms()]\ndb=[b for b in cod.GetBonds() if b.GetBondType()==Chem.BondType.DOUBLE]\na1=[db[0].GetBeginAtomIdx(),db[0].GetEndAtomIdx()]; a2=[db[1].GetBeginAtomIdx(),db[1].GetEndAtomIdx()]\nM1s=CP[a1].mean(0); M2s=CP[a2].mean(0); Mm=0.5*(M1s+M2s); span=np.linalg.norm(M2s-M1s)\nb1=CP[a1[1]]-CP[a1[0]]; b2=CP[a2[1]]-CP[a2[0]]\nif np.dot(b1,b2)<0: b2=-b2\nFsc=frame(M2s-M1s,b1+b2)\ndAv=-(CA-Ir1); dBv=-(NB-Ir1); dAv/=np.linalg.norm(dAv); dBv/=np.linalg.norm(dBv)\nu0=(dAv+dBv); u0/=np.linalg.norm(u0)\nw0=(dBv-dAv); w0-=np.dot(w0,u0)*u0; w0/=np.linalg.norm(w0)\ndef cod_coords(dIrM,s3,sw,phi=0.0,theta=0.0):\n    # rotate u,w about z by theta, then twist about u by phi\n    Rt=rotmat([0,0,1],np.radians(theta))\n    u=Rt@u0; w=Rt@w0\n    Rp=rotmat(u,np.radians(phi)); w=Rp@w\n    nz=np.cross(w,u)   # plane normal of coordination\n    h=np.sqrt(max(dIrM**2-(span/2)**2,0.04))\n    Mt=Ir1+h*u\n    e1=w if not sw else -w\n    Rr=frame(e1,nz*s3)@Fsc.T\n    return (Rr@(CP-Mm).T).T+Mt\n\nnl=len(lsym); nc=len(csym)\nsyms=lsym+lsym+csym+csym+['Ir','Ir']\ngrps=[(0,nl),(nl,2*nl),(2*nl,2*nl+nc),(2*nl+nc,2*nl+2*nc),(2*nl+2*nc,2*nl+2*nc+2)]\nrad={'C':1.75,'N':1.6,'H':1.25,'Ir':2.0}\nrv=np.array([rad[s] for s in syms])\ndef clash(X,fac=0.95):\n    s=0.0; mn=9\n    for g1,g2 in itertools.combinations(range(5),2):\n        A=slice(*grps[g1]); B=slice(*grps[g2])\n        D=cdist(X[A],X[B]); lim=(rv[A][:,None]+rv[B][None,:])*fac\n        if g1==4 or g2==4: lim*=0.60\n        s+=(np.clip(lim-D,0,None)**2).sum()\n    return s\nbest=None\nfor dIrM in [2.6,2.8,3.0]:\n for s3 in [1,-1]:\n  for sw in [False,True]:\n   for phi in range(-40,41,10):\n    for theta in range(-20,21,10):\n     CODa=cod_coords(dIrM,s3,sw,phi,theta)\n     for dih in range(60,121,10):\n      LA=lig_coords(dih)\n      X=np.vstack([LA,(Rz@LA.T).T,CODa,(Rz@CODa.T).T,Ir1[None,:],Ir2[None,:]])\n      c=clash(X)\n      if best is None or c<best[0]: best=(c,dIrM,s3,sw,phi,theta,dih)\nprint(\"best\",best)\nc,dIrM,s3,sw,phi,theta,dih=best\nCODa=cod_coords(dIrM,s3,sw,phi,theta); LA=lig_coords(dih)\nX=np.vstack([LA,(Rz@LA.T).T,CODa,(Rz@CODa.T).T,Ir1[None,:],Ir2[None,:]])\nwith open('start.xyz','w') as fh:\n    fh.write(f\"{len(syms)}\\nstart\\n\")\n    for sy,q in zip(syms,X): fh.write(f\"{sy} {q[0]:.4f} {q[1]:.4f} {q[2]:.4f}\\n\")\noff=dict(A=0,B=nl,CODa=2*nl,CODb=2*nl+nc,Ir1=2*nl+2*nc,Ir2=2*nl+2*nc+1)\njson.dump(dict(nl=nl,nc=nc,C2k=C2k,N3k=N3k,N1k=N1k,ring=ringk,alk=a1+a2,off=off),open('info.json','w'))\nD=squareform(pdist(X)); np.fill_diagonal(D,9)\ndef grp(i):\n    for k,(lo,hi) in zip(['A','B','CODa','CODb','Ir'],grps):\n        if lo<=i<hi: return k\nbad=[(i,syms[i],grp(i),j,syms[j],grp(j),round(D[i,j],2)) for i in range(len(syms)) for j in range(i+1,len(syms)) if D[i,j]<2.2 and grp(i)!=grp(j)]\nfor b in bad: print(b)\nprint(\"Ir1-alkC\",[round(np.linalg.norm(CODa[i]-Ir1),2) for i in a1+a2])\nEOF\npython build8.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 43857,
+   "output_tokens": 9834,
+   "total_tokens": 53691,
+   "input_token_details": {
+    "cache_creation": 0,
+    "cache_read": 42728,
+    "ephemeral_5m_input_tokens": 1127,
+    "ephemeral_1h_input_tokens": 0
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "best (np.float64(4.835219822901838), 3.0, -1, True, -10, -20, 90)\n(12, 'N', 'A', 95, 'Ir', 'Ir', np.float64(2.14))\n(13, 'C', 'A', 94, 'Ir', 'Ir', np.float64(2.05))\n(24, 'H', 'A', 65, 'H', 'CODa', np.float64(2.17))\n(26, 'H', 'A', 81, 'C', 'CODb', np.float64(2.19))\n(39, 'N', 'B', 94, 'Ir', 'Ir', np.float64(2.14))\n(40, 'C', 'B', 95, 'Ir', 'Ir', np.float64(2.05))\n(51, 'H', 'B', 85, 'H', 'CODb', np.float64(2.17))\n(53, 'H', 'B', 61, 'C', 'CODa', np.float64(2.19))\n(55, 'C', 'CODa', 94, 'Ir', 'Ir', np.float64(2.18))\n(59, 'C', 'CODa', 94, 'Ir', 'Ir', np.float64(2.18))\n(64, 'H', 'CODa', 94, 'Ir', 'Ir', np.float64(1.17))\n(71, 'H', 'CODa', 94, 'Ir', 'Ir', np.float64(1.17))\n(75, 'C', 'CODb', 95, 'Ir', 'Ir', np.float64(2.18))\n(79, 'C', 'CODb', 95, 'Ir', 'Ir', np.float64(2.18))\n(84, 'H', 'CODb', 95, 'Ir', 'Ir', np.float64(1.17))\n(91, 'H', 'CODb', 95, 'Ir', 'Ir', np.float64(1.17))\nIr1-alkC [np.float64(2.96), np.float64(3.19), np.float64(2.96), np.float64(3.19)]\n",
+  "name": "bash_kernel",
+  "tool_call_id": "toolu_bdrk_01CwC86ptfAotGAszfVPUg1u"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat << 'EOF' > build9.py\nimport numpy as np, json, itertools\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem, rdMolTransforms\nfrom scipy.spatial.distance import cdist, pdist, squareform\nfrom scipy.optimize import minimize\nfrom scipy.spatial.transform import Rotation as Rot\n\ndef frame(e1,e3raw):\n    e1=e1/np.linalg.norm(e1); e3=e3raw-np.dot(e3raw,e1)*e1; e3/=np.linalg.norm(e3)\n    return np.array([e1,np.cross(e3,e1),e3]).T\n\ndef hexcore(aIr=88.0,aC=136.0,aN=136.0,dIrC=2.05,dCN=1.37,dNIr=2.10):\n    pts=[];p=np.array([0.0,0.0]);th=0.0\n    for L,ang in [(dIrC,aC),(dCN,aN),(dNIr,aIr),(dIrC,aC),(dCN,aN),(dNIr,aIr)]:\n        pts.append(p.copy()); p=p+L*np.array([np.cos(np.radians(th)),np.sin(np.radians(th))]); th+=180-ang\n    return np.array(pts)\npts=hexcore(); pts-=0.5*(pts[0]+pts[3])\nv=pts[3]-pts[0]; a=np.arctan2(v[1],v[0])\nR2=np.array([[np.cos(-a),-np.sin(-a)],[np.sin(-a),np.cos(-a)]]); pts=(R2@pts.T).T\nP3=np.c_[pts,np.zeros(6)]\nIr1,CA,NA,Ir2,CB,NB=P3\nRz=np.diag([-1.0,-1.0,1.0])\n\n# ligand\nlig=Chem.AddHs(Chem.MolFromSmiles(\"Cc1cc(C)cc(C)c1n1ccnc1\"))\nAllChem.EmbedMolecule(lig,randomSeed=11); AllChem.MMFFOptimizeMolecule(lig,maxIters=5000)\nimid=[list(r) for r in lig.GetRingInfo().AtomRings() if len(r)==5][0]\nNs=[i for i in imid if lig.GetAtomWithIdx(i).GetSymbol()=='N']\nC2=[i for i in imid if lig.GetAtomWithIdx(i).GetSymbol()=='C' and all(n in [x.GetIdx() for x in lig.GetAtomWithIdx(i).GetNeighbors()] for n in Ns)][0]\nN1=[i for i in Ns if sum(1 for x in lig.GetAtomWithIdx(i).GetNeighbors() if x.GetIdx() not in imid)==1][0]\nN3=[i for i in Ns if i!=N1][0]\nCipso=[x.GetIdx() for x in lig.GetAtomWithIdx(N1).GetNeighbors() if x.GetIdx() not in imid][0]\nCortho=[x.GetIdx() for x in lig.GetAtomWithIdx(Cipso).GetNeighbors() if x.GetIdx()!=N1][0]\nconf=lig.GetConformer()\nHc2=[x.GetIdx() for x in lig.GetAtomWithIdx(C2).GetNeighbors() if x.GetSymbol()=='H'][0]\nkeep=[i for i in range(lig.GetNumAtoms()) if i!=Hc2]\nlsym=[lig.GetAtomWithIdx(i).GetSymbol() for i in keep]\nidx={o:n for n,o in enumerate(keep)}\nC2k,N1k,N3k=idx[C2],idx[N1],idx[N3]; ringk=[idx[i] for i in imid]\ndef lig_coords(dih):\n    rdMolTransforms.SetDihedralDeg(conf,C2,N1,Cipso,Cortho,float(dih))\n    LP=np.array(conf.GetPositions())[keep]\n    rp=LP[ringk]; nrm=np.linalg.svd(rp-rp.mean(0))[2][2]\n    Fs=frame(LP[N3k]-LP[C2k],nrm)\n    R=frame(NA-CA,np.array([0,0,1.0]))@Fs.T\n    X=(R@(LP-LP[C2k]).T).T+CA\n    mid=0.5*(CA+NA); out=mid/np.linalg.norm(mid)\n    if np.dot(X[ringk].mean(0)-mid,out)<0:\n        e1=(NA-CA)/np.linalg.norm(NA-CA)\n        X=((2*np.outer(e1,e1)-np.eye(3))@(X-CA).T).T+CA\n    return X\nLA90=lig_coords(90.0)\n\n# COD\ncod=Chem.AddHs(Chem.MolFromSmiles(\"C1CC=CCCC=C1\"))\nAllChem.EmbedMolecule(cod,randomSeed=5); AllChem.MMFFOptimizeMolecule(cod,maxIters=5000)\nCP=np.array(cod.GetConformer().GetPositions()); csym=[a.GetSymbol() for a in cod.GetAtoms()]\ndb=[b for b in cod.GetBonds() if b.GetBondType()==Chem.BondType.DOUBLE]\na1=[db[0].GetBeginAtomIdx(),db[0].GetEndAtomIdx()]; a2=[db[1].GetBeginAtomIdx(),db[1].GetEndAtomIdx()]\nalk=a1+a2\nvinH=[]\nfor c in alk:\n    vinH += [x.GetIdx() for x in cod.GetAtomWithIdx(c).GetNeighbors() if x.GetSymbol()=='H']\nCP=CP-CP[alk].mean(0)\n\nnl=len(lsym); nc=len(csym)\nsyms=lsym+lsym+csym+csym+['Ir','Ir']\ngrps=[(0,nl),(nl,2*nl),(2*nl,2*nl+nc),(2*nl+nc,2*nl+2*nc),(2*nl+2*nc,2*nl+2*nc+2)]\nrad={'C':1.75,'N':1.6,'H':1.25,'Ir':2.0}\nrv=np.array([rad[s] for s in syms])\n\ndef place(p):\n    rot=Rot.from_rotvec(p[:3]); t=p[3:6]\n    return rot.apply(CP)+t\ndef build(p,dih=90.0):\n    CODa=place(p); LA=LA90 if dih==90.0 else lig_coords(dih)\n    return np.vstack([LA,(Rz@LA.T).T,CODa,(Rz@CODa.T).T,Ir1[None,:],Ir2[None,:]]),CODa\ndef clash(X,fac=0.97):\n    s=0.0\n    for g1,g2 in itertools.combinations(range(5),2):\n        A=slice(*grps[g1]); B=slice(*grps[g2])\n        D=cdist(X[A],X[B]); lim=(rv[A][:,None]+rv[B][None,:])*fac\n        if g1==4 or g2==4: lim*=0.60\n        s+=(np.clip(lim-D,0,None)**2).sum()\n    return s\ndef cost(p):\n    X,CODa=build(p)\n    c=clash(X)\n    dC=np.linalg.norm(CODa[alk]-Ir1,axis=1)\n    c+=5.0*((dC-2.17)**2).sum()\n    dH=np.linalg.norm(CODa[vinH]-Ir1,axis=1)\n    c+=2.0*(np.clip(2.95-dH,0,None)**2).sum()\n    return c\nrng=np.random.default_rng(3)\nbest=None\nfor k in range(300):\n    r0=Rot.random(random_state=int(rng.integers(1e6))).as_rotvec()\n    t0=Ir1 + 2.2*(-(CA-Ir1)/np.linalg.norm(CA-Ir1) - (NB-Ir1)/np.linalg.norm(NB-Ir1))/np.linalg.norm((CA-Ir1)/np.linalg.norm(CA-Ir1)+(NB-Ir1)/np.linalg.norm(NB-Ir1)) + rng.normal(0,0.3,3)\n    r=minimize(cost,np.r_[r0,t0],method='Powell',options=dict(maxiter=50000,xtol=1e-4,ftol=1e-6))\n    if best is None or r.fun<best[0]: best=(r.fun,r.x.copy())\nprint(\"best\",best[0])\np=best[1]\n# refine ligand dihedral\nbd=None\nfor dih in np.arange(50,131,5):\n    X,_=build(p,float(dih)); c=clash(X)\n    if bd is None or c<bd[0]: bd=(c,dih)\nprint(\"dih\",bd)\nX,CODa=build(p,float(bd[1]))\nwith open('start.xyz','w') as fh:\n    fh.write(f\"{len(syms)}\\nstart\\n\")\n    for sy,q in zip(syms,X): fh.write(f\"{sy} {q[0]:.4f} {q[1]:.4f} {q[2]:.4f}\\n\")\noff=dict(A=0,B=nl,CODa=2*nl,CODb=2*nl+nc,Ir1=2*nl+2*nc,Ir2=2*nl+2*nc+1)\njson.dump(dict(nl=nl,nc=nc,C2k=C2k,N3k=N3k,N1k=N1k,ring=ringk,alk=alk,vinH=vinH,off=off),open('info.json','w'))\nprint(\"Ir1-alkC\",np.round(np.linalg.norm(CODa[alk]-Ir1,axis=1),2))\nprint(\"Ir1-vinH\",np.round(np.linalg.norm(CODa[vinH]-Ir1,axis=1),2))\nD=squareform(pdist(X)); np.fill_diagonal(D,9)\ndef grp(i):\n    for k,(lo,hi) in zip(['A','B','CODa','CODb','Ir'],grps):\n        if lo<=i<hi: return k\nbad=[(i,syms[i],grp(i),j,syms[j],grp(j),round(D[i,j],2)) for i in range(len(syms)) for j in range(i+1,len(syms)) if D[i,j]<2.2 and grp(i)!=grp(j)]\nfor b in bad: print(b)\nEOF\npython build9.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 48371,
+   "output_tokens": 4077,
+   "total_tokens": 52448,
+   "input_token_details": {
+    "cache_creation": 0,
+    "cache_read": 43855,
+    "ephemeral_5m_input_tokens": 4514,
+    "ephemeral_1h_input_tokens": 0
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[TIMEOUT]",
+  "name": "bash_kernel",
+  "tool_call_id": "toolu_bdrk_01WGBgMGMVDwBopvQmZ6NnF7"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "sed -i 's/for k in range(300):/for k in range(40):/' build9.py\ntimeout 1500 python build9.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 52096,
+   "output_tokens": 103,
+   "total_tokens": 52199,
+   "input_token_details": {
+    "cache_creation": 0,
+    "cache_read": 48369,
+    "ephemeral_5m_input_tokens": 3725,
+    "ephemeral_1h_input_tokens": 0
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "best 12.245284228231817\ndih (np.float64(5.387251827380908), np.int64(90))\nIr1-alkC [3.05 2.5  2.5  2.76]\nIr1-vinH [3.63 2.8  2.76 3.16]\n(12, 'N', 'A', 95, 'Ir', 'Ir', np.float64(2.14))\n(13, 'C', 'A', 94, 'Ir', 'Ir', np.float64(2.05))\n(26, 'H', 'A', 82, 'H', 'CODb', np.float64(1.8))\n(26, 'H', 'A', 86, 'H', 'CODb', np.float64(2.02))\n(39, 'N', 'B', 94, 'Ir', 'Ir', np.float64(2.14))\n(40, 'C', 'B', 95, 'Ir', 'Ir', np.float64(2.05))\n(53, 'H', 'B', 62, 'H', 'CODa', np.float64(1.8))\n(53, 'H', 'B', 66, 'H', 'CODa', np.float64(2.02))\n(68, 'H', 'CODa', 94, 'Ir', 'Ir', np.float64(2.09))\n(88, 'H', 'CODb', 95, 'Ir', 'Ir', np.float64(2.09))\n",
+  "name": "bash_kernel",
+  "tool_call_id": "toolu_bdrk_0142TuH4GbEiSaPeCXh6AH3X"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python build8.py >/dev/null 2>&1; head -3 start.xyz; cat info.json"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 52633,
+   "output_tokens": 479,
+   "total_tokens": 53112,
+   "input_token_details": {
+    "cache_creation": 0,
+    "cache_read": 52094,
+    "ephemeral_5m_input_tokens": 537,
+    "ephemeral_1h_input_tokens": 0
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "96\nstart\nC -2.7226 -3.0166 2.5605\n{\"nl\": 27, \"nc\": 20, \"C2k\": 13, \"N3k\": 12, \"N1k\": 9, \"ring\": [10, 9, 13, 12, 11], \"alk\": [2, 3, 6, 7], \"off\": {\"A\": 0, \"B\": 27, \"CODa\": 54, \"CODb\": 74, \"Ir1\": 94, \"Ir2\": 95}}",
+  "name": "bash_kernel",
+  "tool_call_id": "toolu_bdrk_01Xn77qw51Mz7pM9peUMBjfS"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "view_molecule",
+    "args": {
+     "xyz_file_relative_path": "start.xyz",
+     "left_right_deg": 0,
+     "up_down_deg": 0,
+     "reset_view": true
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 52866,
+   "output_tokens": 228,
+   "total_tokens": 53094,
+   "input_token_details": {
+    "cache_creation": 0,
+    "cache_read": 52631,
+    "ephemeral_5m_input_tokens": 233,
+    "ephemeral_1h_input_tokens": 0
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[image]",
+  "name": "view_molecule",
+  "tool_call_id": "toolu_bdrk_01D3nBsQoetE79rzB7akgs8v"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "constraint_xtb",
+    "args": {
+     "input_xyz": "start.xyz",
+     "output_xyz": "opt1.xyz",
+     "gfn_method": "gfn2",
+     "charge": 0,
+     "force_constant": 1.0,
+     "distance_constraints": [
+      {
+       "atoms": [
+        94,
+        13
+       ],
+       "value": 2.05
+      },
+      {
+       "atoms": [
+        94,
+        39
+       ],
+       "value": 2.12
+      },
+      {
+       "atoms": [
+        95,
+        40
+       ],
+       "value": 2.05
+      },
+      {
+       "atoms": [
+        95,
+        12
+       ],
+       "value": 2.12
+      },
+      {
+       "atoms": [
+        94,
+        56
+       ],
+       "value": 2.18
+      },
+      {
+       "atoms": [
+        94,
+        57
+       ],
+       "value": 2.18
+      },
+      {
+       "atoms": [
+        94,
+        60
+       ],
+       "value": 2.18
+      },
+      {
+       "atoms": [
+        94,
+        61
+       ],
+       "value": 2.18
+      },
+      {
+       "atoms": [
+        95,
+        76
+       ],
+       "value": 2.18
+      },
+      {
+       "atoms": [
+        95,
+        77
+       ],
+       "value": 2.18
+      },
+      {
+       "atoms": [
+        95,
+        80
+       ],
+       "value": 2.18
+      },
+      {
+       "atoms": [
+        95,
+        81
+       ],
+       "value": 2.18
+      }
+     ],
+     "ncores": 8
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 54319,
+   "output_tokens": 997,
+   "total_tokens": 55316,
+   "input_token_details": {
+    "cache_creation": 0,
+    "cache_read": 52864,
+    "ephemeral_5m_input_tokens": 1453,
+    "ephemeral_1h_input_tokens": 0
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "{\"return_code\": 0, \"output_xyz\": \"/h/400/skaxu/elagenteworkdir/mol_0054_004abd60_claude-opus-5/opt1.xyz\", \"log_path\": \"/h/400/skaxu/elagenteworkdir/mol_0054_004abd60_claude-opus-5/opt1.log\", \"error_msg\": null}",
+  "name": "constraint_xtb",
+  "tool_call_id": "toolu_bdrk_01RfjEYmX81Uy4g6RjjhaGt1"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python << 'EOF'\nimport numpy as np\nL=open('opt1.xyz').read().split('\\n'); n=int(L[0])\nsym=[];X=[]\nfor l in L[2:2+n]:\n    p=l.split(); sym.append(p[0]); X.append([float(x) for x in p[1:4]])\nX=np.array(X)\npairs=[(94,13),(94,39),(95,40),(95,12),(94,56),(94,57),(94,60),(94,61),(94,95)]\nfor i,j in pairs: print(i,sym[i],j,sym[j],round(np.linalg.norm(X[i]-X[j]),3))\nEOF\ntail -20 opt1.log"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 54912,
+   "output_tokens": 378,
+   "total_tokens": 55290,
+   "input_token_details": {
+    "cache_creation": 0,
+    "cache_read": 54317,
+    "ephemeral_5m_input_tokens": 593,
+    "ephemeral_1h_input_tokens": 0
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "94 Ir 13 C 2.051\n94 Ir 39 N 2.119\n95 Ir 40 C 2.051\n95 Ir 12 N 2.119\n94 Ir 56 C 2.177\n94 Ir 57 C 2.18\n94 Ir 60 C 2.179\n94 Ir 61 C 2.181\n94 Ir 95 Ir 3.381\n          | GRADIENT NORM               0.001192160489 Eh/\u03b1 |\n          | HOMO-LUMO GAP               1.641300115289 eV   |\n           -------------------------------------------------\n\n------------------------------------------------------------------------\n * finished run on 2026/10/05 at 14:18:32.672     \n------------------------------------------------------------------------\n total:\n * wall-time:     0 d,  0 h,  0 min, 31.833 sec\n *  cpu-time:     0 d,  0 h,  1 min, 28.171 sec\n * ratio c/w:     2.770 speedup\n SCF:\n * wall-time:     0 d,  0 h,  0 min,  0.347 sec\n *  cpu-time:     0 d,  0 h,  0 min,  0.942 sec\n * ratio c/w:     2.718 speedup\n ANC optimizer:\n * wall-time:     0 d,  0 h,  0 min, 31.422 sec\n *  cpu-time:     0 d,  0 h,  1 min, 27.144 sec\n * ratio c/w:     2.773 speedup\n\n",
+  "name": "bash_kernel",
+  "tool_call_id": "toolu_bdrk_01Cyyvjcwf1BBegi3PL496vG"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "view_molecule",
+    "args": {
+     "xyz_file_relative_path": "opt1.xyz",
+     "left_right_deg": 0,
+     "up_down_deg": 0,
+     "reset_view": true
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 55698,
+   "output_tokens": 255,
+   "total_tokens": 55953,
+   "input_token_details": {
+    "cache_creation": 0,
+    "cache_read": 54910,
+    "ephemeral_5m_input_tokens": 786,
+    "ephemeral_1h_input_tokens": 0
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[image]",
+  "name": "view_molecule",
+  "tool_call_id": "toolu_bdrk_015NU5D13kCwLRc1gZ7uLDg6"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python << 'EOF'\nimport numpy as np\nfrom scipy.spatial.distance import pdist,squareform\nL=open('opt1.xyz').read().split('\\n'); n=int(L[0])\nsym=[];X=[]\nfor l in L[2:2+n]:\n    p=l.split(); sym.append(p[0]); X.append([float(x) for x in p[1:4]])\nX=np.array(X); D=squareform(pdist(X))\ncov={'C':0.76,'N':0.71,'H':0.31,'Ir':1.41}\nnb={i:[] for i in range(n)}\nfor i in range(n):\n    for j in range(i+1,n):\n        if D[i,j] < 1.3*(cov[sym[i]]+cov[sym[j]]):\n            nb[i].append(j); nb[j].append(i)\nfor i in range(n):\n    print(i,sym[i],[(j,sym[j]) for j in nb[i]])\nEOF"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 57153,
+   "output_tokens": 488,
+   "total_tokens": 57641,
+   "input_token_details": {
+    "cache_creation": 0,
+    "cache_read": 55696,
+    "ephemeral_5m_input_tokens": 1455,
+    "ephemeral_1h_input_tokens": 0
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "0 C [(1, 'C'), (14, 'H'), (15, 'H'), (16, 'H')]\n1 C [(0, 'C'), (2, 'C'), (8, 'C')]\n2 C [(1, 'C'), (3, 'C'), (17, 'H')]\n3 C [(2, 'C'), (4, 'C'), (5, 'C')]\n4 C [(3, 'C'), (18, 'H'), (19, 'H'), (20, 'H')]\n5 C [(3, 'C'), (6, 'C'), (21, 'H')]\n6 C [(5, 'C'), (7, 'C'), (8, 'C')]\n7 C [(6, 'C'), (22, 'H'), (23, 'H'), (24, 'H')]\n8 C [(1, 'C'), (6, 'C'), (9, 'N')]\n9 N [(8, 'C'), (10, 'C'), (13, 'C')]\n10 C [(9, 'N'), (11, 'C'), (25, 'H')]\n11 C [(10, 'C'), (12, 'N'), (26, 'H')]\n12 N [(11, 'C'), (13, 'C'), (95, 'Ir')]\n13 C [(9, 'N'), (12, 'N'), (94, 'Ir'), (95, 'Ir')]\n14 H [(0, 'C')]\n15 H [(0, 'C')]\n16 H [(0, 'C')]\n17 H [(2, 'C')]\n18 H [(4, 'C')]\n19 H [(4, 'C')]\n20 H [(4, 'C')]\n21 H [(5, 'C')]\n22 H [(7, 'C')]\n23 H [(7, 'C')]\n24 H [(7, 'C')]\n25 H [(10, 'C')]\n26 H [(11, 'C')]\n27 C [(28, 'C'), (41, 'H'), (42, 'H'), (43, 'H')]\n28 C [(27, 'C'), (29, 'C'), (35, 'C')]\n29 C [(28, 'C'), (30, 'C'), (44, 'H')]\n30 C [(29, 'C'), (31, 'C'), (32, 'C')]\n31 C [(30, 'C'), (45, 'H'), (46, 'H'), (47, 'H')]\n32 C [(30, 'C'), (33, 'C'), (48, 'H')]\n33 C [(32, 'C'), (34, 'C'), (35, 'C')]\n34 C [(33, 'C'), (49, 'H'), (50, 'H'), (51, 'H')]\n35 C [(28, 'C'), (33, 'C'), (36, 'N')]\n36 N [(35, 'C'), (37, 'C'), (40, 'C')]\n37 C [(36, 'N'), (38, 'C'), (52, 'H')]\n38 C [(37, 'C'), (39, 'N'), (53, 'H')]\n39 N [(38, 'C'), (40, 'C'), (94, 'Ir')]\n40 C [(36, 'N'), (39, 'N'), (94, 'Ir'), (95, 'Ir')]\n41 H [(27, 'C')]\n42 H [(27, 'C')]\n43 H [(27, 'C')]\n44 H [(29, 'C')]\n45 H [(31, 'C')]\n46 H [(31, 'C')]\n47 H [(31, 'C')]\n48 H [(32, 'C')]\n49 H [(34, 'C')]\n50 H [(34, 'C')]\n51 H [(34, 'C')]\n52 H [(37, 'C')]\n53 H [(38, 'C')]\n54 C [(55, 'C'), (61, 'C'), (62, 'H'), (63, 'H')]\n55 C [(54, 'C'), (56, 'C'), (64, 'H'), (65, 'H')]\n56 C [(55, 'C'), (57, 'C'), (66, 'H'), (94, 'Ir')]\n57 C [(56, 'C'), (58, 'C'), (67, 'H'), (94, 'Ir')]\n58 C [(57, 'C'), (59, 'C'), (68, 'H'), (69, 'H')]\n59 C [(58, 'C'), (60, 'C'), (70, 'H'), (71, 'H')]\n60 C [(59, 'C'), (61, 'C'), (72, 'H'), (94, 'Ir')]\n61 C [(54, 'C'), (60, 'C'), (73, 'H'), (94, 'Ir')]\n62 H [(54, 'C')]\n63 H [(54, 'C')]\n64 H [(55, 'C')]\n65 H [(55, 'C')]\n66 H [(56, 'C')]\n67 H [(57, 'C')]\n68 H [(58, 'C')]\n69 H [(58, 'C')]\n70 H [(59, 'C')]\n71 H [(59, 'C')]\n72 H [(60, 'C')]\n73 H [(61, 'C')]\n74 C [(75, 'C'), (81, 'C'), (82, 'H'), (83, 'H')]\n75 C [(74, 'C'), (76, 'C'), (84, 'H'), (85, 'H')]\n76 C [(75, 'C'), (77, 'C'), (86, 'H'), (95, 'Ir')]\n77 C [(76, 'C'), (78, 'C'), (87, 'H'), (95, 'Ir')]\n78 C [(77, 'C'), (79, 'C'), (88, 'H'), (89, 'H')]\n79 C [(78, 'C'), (80, 'C'), (90, 'H'), (91, 'H')]\n80 C [(79, 'C'), (81, 'C'), (92, 'H'), (95, 'Ir')]\n81 C [(74, 'C'), (80, 'C'), (93, 'H'), (95, 'Ir')]\n82 H [(74, 'C')]\n83 H [(74, 'C')]\n84 H [(75, 'C')]\n85 H [(75, 'C')]\n86 H [(76, 'C')]\n87 H [(77, 'C')]\n88 H [(78, 'C')]\n89 H [(78, 'C')]\n90 H [(79, 'C')]\n91 H [(79, 'C')]\n92 H [(80, 'C')]\n93 H [(81, 'C')]\n94 Ir [(13, 'C'), (39, 'N'), (40, 'C'), (56, 'C'), (57, 'C'), (60, 'C'), (61, 'C'), (95, 'Ir')]\n95 Ir [(12, 'N'), (13, 'C'), (40, 'C'), (76, 'C'), (77, 'C'), (80, 'C'), (81, 'C'), (94, 'Ir')]\n",
+  "name": "bash_kernel",
+  "tool_call_id": "toolu_bdrk_018fivmNVZWKfPs4q7vDbvUK"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python -c \"\nimport numpy as np\nL=open('opt1.xyz').read().split('\\n');n=int(L[0])\nX=np.array([[float(x) for x in l.split()[1:4]] for l in L[2:2+n]])\nfor a,b in [(13,94),(13,95),(40,94),(40,95),(12,95),(39,94),(94,95),(12,94),(39,95)]:\n    print(a,b,round(np.linalg.norm(X[a]-X[b]),3))\n\""
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 59813,
+   "output_tokens": 428,
+   "total_tokens": 60241,
+   "input_token_details": {
+    "cache_creation": 0,
+    "cache_read": 57151,
+    "ephemeral_5m_input_tokens": 2660,
+    "ephemeral_1h_input_tokens": 0
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "13 94 2.051\n13 95 2.81\n40 94 2.809\n40 95 2.051\n12 95 2.119\n39 94 2.119\n94 95 3.381\n12 94 2.971\n39 95 2.97\n",
+  "name": "bash_kernel",
+  "tool_call_id": "toolu_bdrk_01JMMhh9ZQbfR9C96EkR9U5N"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "view_molecule",
+    "args": {
+     "xyz_file_relative_path": "opt1.xyz",
+     "left_right_deg": 0,
+     "up_down_deg": 80,
+     "reset_view": true
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 60102,
+   "output_tokens": 325,
+   "total_tokens": 60427,
+   "input_token_details": {
+    "cache_creation": 0,
+    "cache_read": 59811,
+    "ephemeral_5m_input_tokens": 289,
+    "ephemeral_1h_input_tokens": 0
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[image]",
+  "name": "view_molecule",
+  "tool_call_id": "toolu_bdrk_01AVzsbpen2TaPSBdrgKtpy5"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cp opt1.xyz answer.xyz\npython - << 'EOF'\nL=open('answer.xyz').read().split('\\n')\nL[1]=\"Ir2(COD)2 bridged by bis(mesityl-imidazol-2-ylidene) - GFN2 optimized\"\nopen('answer.xyz','w').write('\\n'.join(L))\nEOF\nhead -3 answer.xyz; grep -c \" \" answer.xyz; python -c \"\nL=open('answer.xyz').read().split(chr(10));print(L[0]);print(sum(1 for l in L[2:] if l.strip()))\""
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 61557,
+   "output_tokens": 505,
+   "total_tokens": 62062,
+   "input_token_details": {
+    "cache_creation": 0,
+    "cache_read": 60100,
+    "ephemeral_5m_input_tokens": 1455,
+    "ephemeral_1h_input_tokens": 0
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "96\nIr2(COD)2 bridged by bis(mesityl-imidazol-2-ylidene) - GFN2 optimized\nC           -4.06565888070709       -1.72681901733830        2.42972122675198\n97\n96\n96\n",
+  "name": "bash_kernel",
+  "tool_call_id": "toolu_bdrk_01DrTkCTUCeZ5UwVsEu9TrZo"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "awk 'NR>2{c[$1]++}END{for(k in c)print k,c[k]}' answer.xyz"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 61891,
+   "output_tokens": 215,
+   "total_tokens": 62106,
+   "input_token_details": {
+    "cache_creation": 0,
+    "cache_read": 61555,
+    "ephemeral_5m_input_tokens": 334,
+    "ephemeral_1h_input_tokens": 0
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "N 4\nC 40\nIr 2\nH 50\n",
+  "name": "bash_kernel",
+  "tool_call_id": "toolu_bdrk_01HMU6ngjziZJ6ydTNAK2arP"
+ },
+ {
+  "type": "AIMessage",
+  "content": "`answer.xyz` is written in the working directory.\n\n**Structure built:** a dinuclear Ir(I) complex, **[Ir(COD)]\u2082 bridged by two N\u2011mesityl\u2011imidazol\u20112\u2011ylidene (NHC) ligands** \u2014 formula C\u2084\u2080H\u2085\u2080Ir\u2082N\u2084 (96 atoms).\n\nConstruction summary:\n- Built a planar six\u2011membered Ir\u2013C\u2013N\u2013Ir\u2013C\u2013N core (centrosymmetric, C\u2082\u1d62\u2011like), with each NHC carbene carbon \u03c3\u2011bonded to one Ir (2.05 \u00c5) and its other ring N datively bound to the second Ir (2.12 \u00c5), reproducing the drawn head\u2011to\u2011tail bridging motif.\n- Attached the N\u2011mesityl groups (near\u2011perpendicular to the imidazole rings, as expected sterically) and one \u03b7\u2074\u20111,5\u2011cyclooctadiene on each Ir, occupying the two remaining coordination sites (Ir\u2013C(alkene) \u2248 2.18 \u00c5) to give square\u2011planar\u2011like Ir centres.\n- Resolved steric clashes by systematic/stochastic rigid\u2011body search, then relaxed the full structure with GFN2\u2011xTB under distance constraints on the Ir\u2013C(carbene), Ir\u2013N, and Ir\u2013COD contacts (gradient norm 0.0012 Eh/\u03b1).\n\nFinal connectivity check confirms every atom has the correct bonding: intact mesityl rings, imidazolylidene rings, two intact COD rings each \u03b7\u2074\u2011bound, and the expected Ir\u2082(\u03bc\u2011NHC)\u2082 core (Ir\u00b7\u00b7\u00b7Ir 3.38 \u00c5).",
+  "usage": {
+   "input_tokens": 62002,
+   "output_tokens": 735,
+   "total_tokens": 62737,
+   "input_token_details": {
+    "cache_creation": 0,
+    "cache_read": 61889,
+    "ephemeral_5m_input_tokens": 111,
+    "ephemeral_1h_input_tokens": 0
+   }
+  }
+ }
+]

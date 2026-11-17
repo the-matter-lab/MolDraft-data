@@ -1,0 +1,553 @@
+[
+ {
+  "type": "SystemMessage",
+  "content": "You are a helpful chemistry assistant. You build 3D molecular\n  structures from the chemical information you are given, including 2D drawings\n  supplied as images.\n\n  When you are given a 2D drawing of a molecule, your task is to produce the 3D\n  structure that drawing depicts and save it as `answer.xyz` in your working\n  directory.\n\n  Requirements for `answer.xyz`:\n  - Include all explicit hydrogens.\n  - Use a right-handed Cartesian coordinate system, units of angstroms.\n  - Standard XYZ format: first line is the total atom count, second line a\n    one-line comment, each remaining line `Element X Y Z`.\n\n  When you are done, confirm that `answer.xyz` exists in the working directory.\n  "
+ },
+ {
+  "type": "HumanMessage",
+  "content": "A 2D structure of a molecule is provided as a PNG file in your working directory: mol_0117.png\n\nBuild the 3D structure it depicts and save it as answer.xyz.\n"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "view_png_file",
+    "args": {
+     "png_file_relative_path": "mol_0117.png"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 1047,
+   "output_tokens": 47,
+   "total_tokens": 1094,
+   "input_token_details": {
+    "cache_read": 1045
+   },
+   "output_token_details": {
+    "reasoning": 19
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[image]",
+  "name": "view_png_file",
+  "tool_call_id": "call_2acc429658645721bbe02c401243aacb"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "ls -l; python - <<'PY'\nimport rdkit; print('rdkit',rdkit.__version__)\nPY"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 3063,
+   "output_tokens": 3033,
+   "total_tokens": 6096,
+   "input_token_details": {
+    "cache_read": 2912
+   },
+   "output_token_details": {
+    "reasoning": 2985
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "total 109\n-rw-r--r-- 1 root root 110000 Oct  5 20:55 mol_0117.png\nrdkit 2026.03.1\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_4020c967ea9a5372adcffc03ae47a87f"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > /tmp/build.py <<'PY'\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem\nfrom rdkit.Geometry import Point3D\nimport numpy as np\nfrom scipy.optimize import least_squares\n\n# A substituted bis(imino)pyridine (PDI) tridentate ligand, with two phosphine arms\n# positioned to chelate the second cobalt and a third phosphine substituent.\nsmi='n1c(C=Nc2ccccc2P(C(C)C)C(C)C)c(CCP(C(C)C)C(C)C)c(-c2ccccc2)c(CCP(C(C)C)C(C)C)c(C=Nc2ccccc2)c1'\nm=Chem.MolFromSmiles(smi)\nif m is None: raise Exception('bad smiles')\n# donor N indices\nNs=[a.GetIdx() for a in m.GetAtoms() if a.GetSymbol()=='N']\nPs=[a.GetIdx() for a in m.GetAtoms() if a.GetSymbol()=='P']\nprint('heavy',m.GetNumAtoms(),'N',Ns,'P',Ps)\n# identify the two phosphines whose P is bonded to an aliphatic carbon linker\nPcoord=[]; Pother=[]\nfor p in Ps:\n    nb=m.GetAtomWithIdx(p).GetNeighbors()[0]\n    if not nb.GetIsAromatic() and nb.GetSymbol()=='C' and any(x.GetSymbol()=='C' and x.GetIdx()!=p for x in nb.GetNeighbors()):\n        Pcoord.append(p)\n    else: Pother.append(p)\nprint('selected P',Pcoord,'other',Pother)\n# add hydrogens\nmh=Chem.AddHs(m)\nparams=AllChem.ETKDGv3(); params.randomSeed=20260611; params.numThreads=4; params.pruneRmsThresh=0.4\nids=AllChem.EmbedMultipleConfs(mh,numConfs=60,params=params)\nprint('confs',len(ids))\nprops=AllChem.MMFFGetMoleculeProperties(mh)\n# fit a Co1 center to the three N donor positions at 1.90 A\n# fit Co2 to both P donors at 2.25 A and Co1 at 2.55 A\ndef fit_co1(xyz):\n    pts=xyz[Ns]\n    init=pts.mean(axis=0)\n    return least_squares(lambda c: np.linalg.norm(pts-c,axis=1)-1.92,init).x\n\ndef fit_co2(xyz,c1):\n    pts=xyz[Pcoord]\n    # initialize below / near Co1, but optimize all coordinates\n    init=pts.mean(axis=0)*0.65+c1*0.35\n    return least_squares(lambda c: np.r_[np.linalg.norm(pts-c,axis=1)-2.25,np.linalg.norm(c-c1)-2.55],init).x\nbest=None\nfor cid in ids:\n    ff=AllChem.MMFFGetMoleculeForceField(mh,props,confId=cid)\n    ff.Minimize(maxIts=350)\n    energy=ff.CalcEnergy()\n    conf=mh.GetConformer(cid)\n    xyz=np.array(conf.GetPositions())\n    c1=fit_co1(xyz); c2=fit_co2(xyz,c1)\n    err=np.sum((np.linalg.norm(xyz[Ns]-c1,axis=1)-1.92)**2)*12 + np.sum((np.linalg.norm(xyz[Pcoord]-c2,axis=1)-2.25)**2)*8 + (np.linalg.norm(c1-c2)-2.55)**2*8\n    score=energy+err\n    if best is None or score<best[0]: best=(score,energy,err,cid,xyz,c1,c2)\nprint('best',best[:4], 'CoCo',np.linalg.norm(best[5]-best[6]),'Ndist',np.linalg.norm(best[4][Ns]-best[5],axis=1),'Pdist',np.linalg.norm(best[4][Pcoord]-best[6],axis=1))\nscore,energy,err,cid,xyz,c1,c2=best\n# Fix N-donor target atom metrics and use the resultant organics conformer.\n# Build the N-N(SiMe3)2 fragment, allowing initial NH2 geometry, then remove the two NH hydrogens.\nfrag=Chem.MolFromSmiles('NN([Si](C)(C)C)[Si](C)(C)C')\nfh=Chem.AddHs(frag)\npf=AllChem.ETKDGv3(); pf.randomSeed=20260612\nif AllChem.EmbedMolecule(fh,pf)<0: raise Exception('embed fragment fail')\nAllChem.MMFFOptimizeMolecule(fh,maxIters=300)\nfconf=fh.GetConformer(); fxyz=np.array(fconf.GetPositions())\n# Find first N (imido N) and the attached second N. First nitrogen was NH2 in free hydrazine;\n# discard those two H atoms (their indices are bonded to N1).\nn1=0; n2=1\nremove=[]\nfor a in fh.GetAtomWithIdx(n1).GetNeighbors():\n    if a.GetSymbol()=='H': remove.append(a.GetIdx())\nprint('removed N-H',remove)\nkeep=[i for i in range(fh.GetNumAtoms()) if i not in remove]\n# align vector N1->N2 to the Co2 -> imido direction (point away from Co1)\nv=fxyz[n2]-fxyz[n1]; v=v/np.linalg.norm(v)\ntarget=(c2-c1); target=target/np.linalg.norm(target)\n# Kabsch rotation to take v to target\ncross=np.cross(v,target); dot=np.dot(v,target)\nif np.linalg.norm(cross)<1e-10:\n    R=np.eye(3) if dot>0 else np.diag([1,-1,-1])\nelse:\n    K=np.array([[0,-cross[2],cross[1]],[cross[2],0,-cross[0]],[-cross[1],cross[0],0]])\n    R=np.eye(3)+K+K@K*((1-dot)/(np.linalg.norm(cross)**2))\n# Place imido N at 1.72 A from Co2 and move attached hydrazide accordingly\nn1pos=c2+target*1.72\nftrans=(fxyz-np.array(fxyz[n1]))@R.T+n1pos\n# combine ligand coordinates plus Co1/Co2 plus fragment coordinates minus removed Hs\nsymbols=[a.GetSymbol() for a in mh.GetAtoms()]\ncoords=list(xyz)\n# Co atoms\nsymbols += ['Co','Co']\ncoords += [c1,c2]\n# fragment retained\nfor i in keep:\n    symbols.append(fh.GetAtomWithIdx(i).GetSymbol())\n    coords.append(ftrans[i])\ncoords=np.array(coords)\n# Translate to center around origin\ncoords-=coords.mean(axis=0)\nwith open('answer.xyz','w') as f:\n    f.write(f'{len(symbols)}\\n')\n    f.write('Co2 PDI phosphine complex with bis(trimethylsilyl)hydrazido ligand; S=1\\n')\n    for el,(x,y,z) in zip(symbols,coords):\n        f.write(f'{el:2s} {x: .8f} {y: .8f} {z: .8f}\\n')\nprint('wrote',len(symbols),'atoms')\nPY\npython /tmp/build.py\nhead -5 answer.xyz; tail -5 answer.xyz"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 6149,
+   "output_tokens": 11263,
+   "total_tokens": 17412,
+   "input_token_details": {
+    "cache_read": 2912
+   },
+   "output_token_details": {
+    "reasoning": 9526
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[20:57:52] Can't kekulize mol.  Unkekulized atoms: 0 1 17 27 34 44 53\nTraceback (most recent call last):\n  File \"/tmp/build.py\", line 11, in <module>\n    if m is None: raise Exception('bad smiles')\n                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nException: bad smiles\nhead: cannot open 'answer.xyz' for reading: No such file or directory\ntail: cannot open 'answer.xyz' for reading: No such file or directory\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_7cce4dcd02a8595bb61bdfb452f74588"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "sed -i \"s/c(C=Nc2ccccc2)c1'/c(C=Nc2ccccc2)1'/\" /tmp/build.py; grep smi= /tmp/build.py; python /tmp/build.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 17541,
+   "output_tokens": 175,
+   "total_tokens": 17716,
+   "input_token_details": {
+    "cache_read": 5998
+   },
+   "output_token_details": {
+    "reasoning": 108
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "smi='n1c(C=Nc2ccccc2P(C(C)C)C(C)C)c(CCP(C(C)C)C(C)C)c(-c2ccccc2)c(CCP(C(C)C)C(C)C)c(C=Nc2ccccc2)1'\nheavy 53 N [0, 3, 46] P [10, 20, 37]\nselected P [20, 37] other [10]\nconfs 54\nbest (np.float64(278.75761999212966), 184.17844336395277, np.float64(94.57917662817691), 34) CoCo 3.103209296347559 Ndist [1.71211252 2.63244211 2.66104358] Pdist [4.49193962 4.45003602]\nremoved N-H [10, 11]\nwrote 149 atoms\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_59aaf55bcd545a2abf75becb8e0bbb64"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python - <<'PY'\np='/tmp/build.py'\ns=open(p).read()\nstart=s.index('best=None')\nend=s.index('# Build the N-N(SiMe3)2 fragment')\nnew='''best=None\n# Simultaneously relax the ligand and the two metal positions under coordination restraints.\n# This lets the phosphine arms fold toward a common second metal site.\nfrom scipy.optimize import minimize\nfor cid in ids:\n    ff=AllChem.MMFFGetMoleculeForceField(mh,props,confId=cid)\n    ff.Minimize(maxIts=500)\n    conf=mh.GetConformer(cid)\n    xyz=np.array(conf.GetPositions())\n    c1=fit_co1(xyz); c2=fit_co2(xyz,c1)\n    x0=np.concatenate([xyz.ravel(),c1,c2])\n    n=mh.GetNumAtoms()\n    # constraints are lengths (atom index, metal slot, target)\n    pairs=[(i,0,1.98) for i in Ns]+[(i,1,2.25) for i in Pcoord]+[(None,None,2.55)]\n    def fun(q):\n        xx=q[:3*n].reshape((n,3)); m1=q[3*n:3*n+3]; m2=q[3*n+3:3*n+6]\n        en=ff.CalcEnergy(q[:3*n].tolist())\n        grad=np.array(ff.CalcGrad(q[:3*n].tolist())).reshape((n,3))\n        gm1=np.zeros(3); gm2=np.zeros(3); pen=0.0\n        for atom,slot,target in pairs:\n            if atom is None:\n                delta=m2-m1\n            else:\n                metal=m1 if slot==0 else m2\n                delta=metal-xx[atom]\n            d=np.linalg.norm(delta); d=max(d,1e-8); r=d-target\n            k=120.0\n            pen+=k*r*r\n            g=2*k*r*delta/d\n            if atom is None:\n                gm2+=g; gm1-=g\n            else:\n                grad[atom]-=g\n                if slot==0: gm1+=g\n                else: gm2+=g\n        return en+pen, np.concatenate([grad.ravel(),gm1,gm2])\n    opt=minimize(fun,x0,jac=True,method='L-BFGS-B',options={'maxiter':450,'ftol':2e-8})\n    q=opt.x; xyz=q[:3*n].reshape((n,3)); c1=q[3*n:3*n+3]; c2=q[3*n+3:3*n+6]\n    # compare optimized configurations by objective\n    score=opt.fun\n    if best is None or score<best[0]: best=(score,opt.fun,0.0,cid,xyz,c1,c2)\nprint('best',best[:4], 'CoCo',np.linalg.norm(best[5]-best[6]),'Ndist',np.linalg.norm(best[4][Ns]-best[5],axis=1),'Pdist',np.linalg.norm(best[4][Pcoord]-best[6],axis=1))\nscore,energy,err,cid,xyz,c1,c2=best\n'''\ns=s[:start]+new+s[end:]\nopen(p,'w').write(s)\nPY\npython /tmp/build.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 17932,
+   "output_tokens": 1974,
+   "total_tokens": 19906,
+   "input_token_details": {
+    "cache_read": 17390
+   },
+   "output_token_details": {
+    "reasoning": 1190
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "heavy 53 N [0, 3, 46] P [10, 20, 37]\nselected P [20, 37] other [10]\nconfs 54\nbest (np.float64(207.36879559647878), np.float64(207.36879559647878), 0.0, 42) CoCo 2.615452581438965 Ndist [1.95835373 2.07182047 2.05692279] Pdist [2.30761933 2.31108427]\nremoved N-H [10, 11]\nwrote 149 atoms\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_58d2bb7e61f45b9794429043e8c997cb"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "view_molecule",
+    "args": {
+     "xyz_file_relative_path": "answer.xyz",
+     "left_right_deg": 0,
+     "up_down_deg": 0,
+     "reset_view": true
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 20053,
+   "output_tokens": 239,
+   "total_tokens": 20292,
+   "input_token_details": {
+    "cache_read": 17781
+   },
+   "output_token_details": {
+    "reasoning": 197
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[image]",
+  "name": "view_molecule",
+  "tool_call_id": "call_81bda942cfe652b28e8863c8a26622fb"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python - <<'PY'\nimport numpy as np\nl=open('answer.xyz').read().splitlines(); n=int(l[0]); a=[]\nfor s in l[2:]:\n t=s.split(); a.append((t[0],np.array(list(map(float,t[1:4])))))\nprint('count',n,len(a), 'elements', {e:sum(x[0]==e for x in a) for e in set(x[0] for x in a)})\n# closest non-H pairs, sorted\np=[]\nfor i,(e,x) in enumerate(a):\n if e=='H': continue\n for j,(f,y) in enumerate(a[:i]):\n  if f=='H': continue\n  d=np.linalg.norm(x-y)\n  if d<1.25: p.append((d,i,e,j,f))\nprint('very close non-H',sorted(p)[:20])\n# max extent\nxyz=np.array([x for e,x in a]); print('range',xyz.min(0),xyz.max(0))\nPY"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 21330,
+   "output_tokens": 1291,
+   "total_tokens": 22621,
+   "input_token_details": {
+    "cache_read": 19902
+   },
+   "output_token_details": {
+    "reasoning": 1034
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "count 149 149 elements {'Co': 2, 'N': 5, 'H': 84, 'C': 53, 'P': 3, 'Si': 2}\nvery close non-H [(np.float64(0.1923254805570449), 124, 'C', 24, 'C'), (np.float64(0.8425222455456142), 128, 'C', 38, 'C'), (np.float64(0.9528713751593414), 127, 'Si', 39, 'C'), (np.float64(1.1109860912778653), 130, 'C', 39, 'C'), (np.float64(1.1217723629448804), 123, 'Si', 25, 'C'), (np.float64(1.165254841070409), 128, 'C', 40, 'C')]\nrange [-6.91869916 -7.42700814 -6.99531965] [8.968124   5.32651431 5.80864567]\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_8537b84bad285a8784976caad9548507"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "# instrument script for diagnostics before writing\ncp /tmp/build.py /tmp/build_debug.py\npython - <<'PY'\np='/tmp/build_debug.py'; s=open(p).read(); s=s.replace(\"# combine ligand coordinates plus Co1/Co2 plus fragment coordinates minus removed Hs\", \"print('Co1,Co2',c1,c2,'centroid',xyz[:53].mean(axis=0),'dir', (c2-c1)/np.linalg.norm(c2-c1))\\n# combine ligand coordinates plus Co1/Co2 plus fragment coordinates minus removed Hs\")\ns=s.replace(\"coords=np.array(coords)\\n# Translate\", \"coords=np.array(coords)\\n# check nearest collisions fragment against ligand\\nbaseN=len(symbols)-len(keep)\\nfor ii in range(baseN,len(symbols)):\\n    if symbols[ii]=='H': continue\\n    d=np.linalg.norm(coords[:n]-coords[ii],axis=1); jj=int(np.argmin(d))\\n    if d[jj]<1.5: print('collision',ii,symbols[ii],d[jj],jj,symbols[jj])\\n# Translate\")\nopen(p,'w').write(s)\nPY\npython /tmp/build_debug.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 22873,
+   "output_tokens": 1287,
+   "total_tokens": 24160,
+   "input_token_details": {
+    "cache_read": 21179
+   },
+   "output_token_details": {
+    "reasoning": 999
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "N atoms: 155 formula counts: {'C': 59, 'H': 89, 'Ir': 1, 'N': 4, 'P': 1, 'Zn': 1}\nIr-C(NHC): 2.02 2.02\nNHC-top NHC-bottom [(np.float64(2.7260996965415827), 6, 86, 'C', 'C'), (np.float64(2.7260996965415827), 21, 71, 'C', 'C'), (np.float64(2.7408019590360855), 9, 78, 'C', 'C')]\nNHC-top PMe3 [(np.float64(1.0680703344022602), 13, 134, 'C', 'C'), (np.float64(1.2211893783687415), 12, 134, 'C', 'C'), (np.float64(1.8210759242176537), 13, 131, 'C', 'P')]\nNHC-bottom PMe3 [(np.float64(1.4711225574758575), 75, 132, 'C', 'C'), (np.float64(1.5528721838213664), 76, 132, 'C', 'C'), (np.float64(1.6165312443363271), 71, 133, 'C', 'C')]\nNHC-top ZnEt [(np.float64(1.4095823658660327), 25, 144, 'C', 'C'), (np.float64(1.4591967858716197), 24, 144, 'C', 'C'), (np.float64(1.8789810674339584), 25, 145, 'C', 'C')]\nNHC-bottom ZnEt [(np.float64(1.878981067433958), 90, 145, 'C', 'C'), (np.float64(2.3293821166999167), 94, 144, 'C', 'C'), (np.float64(2.3345602100228318), 91, 146, 'C', 'Zn')]\nPMe3 ZnEt [(np.float64(4.584429859289962), 131, 146, 'P', 'Zn'), (np.float64(5.272522445663302), 133, 146, 'C', 'Zn'), (np.float64(5.619650489050719), 134, 146, 'C', 'Zn')]\nPMe3 Ir-hydride []\nNHC-top Ir-hydride []\nNHC-bottom Ir-hydride []\n[21:00:39] UFFTYPER: Unrecognized charge state for atom: 2\n[21:00:39] UFFTYPER: Unrecognized atom type: Zn+2 (2)\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_b40c0a8c8bd55344a9f0e13ddc7d11f0"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "head -50 /tmp/build_debug.py; head -5 /tmp/build.py; pwd; ls -l answer.xyz"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 24796,
+   "output_tokens": 93,
+   "total_tokens": 24889,
+   "input_token_details": {
+    "cache_read": 22722
+   },
+   "output_token_details": {
+    "reasoning": 49
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "from rdkit import Chem\nfrom rdkit.Chem import AllChem\nimport numpy as np, math\nfrom scipy.spatial.transform import Rotation\n\natoms=[]; coords=[]; groups=[]\ndef add_fragment(m, pos, group):\n    for i,a in enumerate(m.GetAtoms()):\n        atoms.append(a.GetSymbol()); coords.append(pos[i]); groups.append(group)\n\ndef normalize(v):\n    v=np.array(v,dtype=float); return v/np.linalg.norm(v)\ndef rotate_vecs(xyz, source, target):\n    source=normalize(source); target=normalize(target)\n    rot,_=Rotation.align_vectors(target.reshape(1,3), source.reshape(1,3))\n    return rot.apply(xyz), rot\n\n# Central iridium, origin\natoms.append('Ir'); coords.append(np.array([0.,0.,0.])); groups.append('Ir')\n\n# Two NHC ligands bearing four 2,6-diisopropylphenyl groups.\nsm='[C]1N(c2c(C(C)C)cccc2C(C)C)C=CN1c1c(C(C)C)cccc1C(C)C'\nbase=Chem.MolFromSmiles(sm)\nbase=Chem.AddHs(base)\nassert base is not None\nassert AllChem.EmbedMolecule(base, randomSeed=118)==0\nAllChem.MMFFOptimizeMolecule(base, maxIters=500)\nbase_xyz=np.array(base.GetConformer().GetPositions())\n# Core indices: Ccarbene=0, N=1/16, ring CH=14/15.\nfor sign, zc, label in [(1,2.02,'NHC-top'),(-1,-2.02,'NHC-bottom')]:\n    # Local frame from embedded core: x follows N1 -> N16, z follows C0 -> mean(N).\n    c0=base_xyz[0]\n    ez=normalize((base_xyz[1]+base_xyz[16])*0.5-c0)\n    ex=base_xyz[16]-base_xyz[1]\n    ex=normalize(ex-np.dot(ex,ez)*ez)\n    ey=normalize(np.cross(ez,ex)) # right-handed ex,ey,ez\n    local=np.stack([(base_xyz-c0)@ex,(base_xyz-c0)@ey,(base_xyz-c0)@ez],axis=1)\n    # Proper rotation; bottom is 180 degrees about x.\n    world=local.copy()\n    world[:,1]*=sign\n    world[:,2]*=sign\n    world += np.array([0.,0.,zc])\n    # Impose chemically sensible, near-planar imidazole core geometry.\n    targets={\n        0:np.array([0.,0.,zc]),\n        1:np.array([-1.07,0.,zc+sign*0.82]),\n        16:np.array([1.07,0.,zc+sign*0.82]),\n        14:np.array([-0.68,0.,zc+sign*2.15]),\n        15:np.array([0.68,0.,zc+sign*2.15]),\n    }\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem\nimport numpy as np, math\nfrom scipy.spatial.transform import Rotation\n\n/h/400/skaxu/elagenteworkdir/mol_0117_004abd60_gpt-6-luna\n-rw-r--r-- 1 root root 6147 Oct  5 21:00 answer.xyz\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_bb6869bd3a0a53a5b120dc8653101d0e"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "head -3 answer.xyz; tail -3 answer.xyz; stat /tmp/build.py answer.xyz"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 25637,
+   "output_tokens": 181,
+   "total_tokens": 25818,
+   "input_token_details": {
+    "cache_read": 24645
+   },
+   "output_token_details": {
+    "reasoning": 142
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "155\nProposed 3D structure of the depicted Ir/NHC/PMe3/ZnEt complex; Cartesian coordinates in angstrom\nIr  0.00000000  0.00000000  0.00000000\nH   0.51296821  1.57875382  0.00000000\nH  -1.34296821 -0.97572352  0.00000000\nH   0.51296821 -1.57875382  0.00000000\n  File: /tmp/build.py\n  Size: 2035      \tBlocks: 8          IO Block: 4096   regular file\nDevice: 811h/2065d\tInode: 1636261337  Links: 1\nAccess: (0644/-rw-r--r--)  Uid: (    0/    root)   Gid: (    0/    root)\nAccess: 2026-10-05 21:01:06.500521194 -0400\nModify: 2026-10-05 21:01:06.028508073 -0400\nChange: 2026-10-05 21:01:06.028508073 -0400\n Birth: 2026-10-05 20:57:56.183259558 -0400\n  File: answer.xyz\n  Size: 6147      \tBlocks: 17         IO Block: 1048576 regular file\nDevice: 3bh/59d\tInode: 3535524     Links: 1\nAccess: (0644/-rw-r--r--)  Uid: (    0/    root)   Gid: (    0/    root)\nAccess: 2026-10-05 20:58:23.553251376 -0400\nModify: 2026-10-05 21:00:39.896494884 -0400\nChange: 2026-10-05 21:00:39.896494884 -0400\n Birth: -\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_b4c47e19f0ed539dbce3c10b3710ab53"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > /tmp/m0117_build.py <<'PY'\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem\nimport numpy as np\nfrom scipy.optimize import least_squares, minimize\nfrom scipy.spatial.transform import Rotation\nsmi='n1c(C=Nc2ccccc2P(C(C)C)C(C)C)c(CCP(C(C)C)C(C)C)c(-c2ccccc2)c(CCP(C(C)C)C(C)C)c(C=Nc2ccccc2)1'\nm=Chem.MolFromSmiles(smi); mh=Chem.AddHs(m)\nNs=[a.GetIdx() for a in m.GetAtoms() if a.GetSymbol()=='N']; Ps=[a.GetIdx() for a in m.GetAtoms() if a.GetSymbol()=='P']\nPcoord=[p for p in Ps if (not m.GetAtomWithIdx(m.GetAtomWithIdx(p).GetNeighbors()[0].GetIdx()).GetIsAromatic()) and m.GetAtomWithIdx(p).GetNeighbors()[0].GetSymbol()=='C' and any(x.GetSymbol()=='C' and x.GetIdx()!=p for x in m.GetAtomWithIdx(p).GetNeighbors()[0].GetNeighbors())]\nprint('n heavy',m.GetNumAtoms(),'with H',mh.GetNumAtoms(),'donors',Ns,'P',Ps,Pcoord)\npa=AllChem.ETKDGv3(); pa.randomSeed=117; pa.numThreads=4; pa.pruneRmsThresh=0.4\nids=AllChem.EmbedMultipleConfs(mh,numConfs=30,params=pa); props=AllChem.MMFFGetMoleculeProperties(mh)\nbest=None\nfor cid in ids:\n ff=AllChem.MMFFGetMoleculeForceField(mh,props,confId=cid)\n ff.Minimize(maxIts=1000)\n conf=mh.GetConformer(cid); xyz=np.array(conf.GetPositions()); energy=ff.CalcEnergy()\n # examine ligand intramolecular bad contacts heavy-atom pairs excluding bonded/1-3\n heavy=[a.GetIdx() for a in mh.GetAtoms() if a.GetSymbol()!='H']\n dmin=10\n for ii,i in enumerate(heavy):\n  for j in heavy[:ii]:\n   if m.GetBondBetweenAtoms(i,j): continue\n   d=np.linalg.norm(xyz[i]-xyz[j]); dmin=min(dmin,d)\n # fit Co1 center and Co2 center: donor distance / metal-metal geometry\n c1=least_squares(lambda c: np.linalg.norm(xyz[Ns]-c,axis=1)-1.98,xyz[Ns].mean(0)).x\n c2=least_squares(lambda c: np.r_[np.linalg.norm(xyz[Pcoord]-c,axis=1)-2.25,np.linalg.norm(c-c1)-2.55],xyz[Pcoord].mean(0)).x\n err=np.sum((np.linalg.norm(xyz[Ns]-c1,axis=1)-1.98)**2)+np.sum((np.linalg.norm(xyz[Pcoord]-c2,axis=1)-2.25)**2)+(np.linalg.norm(c1-c2)-2.55)**2\n # select only organic conformer lowest energy plus metal-fit; constrain score but make avoid grotesque nonbonded collisions\n score=energy+25*err+max(0,2.4-dmin)**2*100\n if best is None or score<best[0]: best=(score,energy,err,dmin,cid,xyz,c1,c2)\nprint('best initial',best[:5], 'N distances',np.linalg.norm(best[5][Ns]-best[6],axis=1),'P dists',np.linalg.norm(best[5][Pcoord]-best[7],axis=1))\n# use best conformer; retain MMFF minimized ligand structure. Give c1/c2 positions from fit; if donor fits are not perfect, use best-fit geometry without distorting organic covalent structure.\n_,energy,err,dmin,cid,xyz,c1,c2=best\n# Optimize metal sites exactly in the least-squares sense for chemically sensible distances, without moving ligand\n# pick c2 solution among mirror alternatives by minimizing overlap against ligand and favoring away from ligand centroid\n# sample alternative least-squares seeds\ncands=[]\nfor seed in [xyz[Pcoord].mean(0)+np.array(v) for v in ([0,0,2],[0,0,-2],[2,0,0],[-2,0,0],[0,2,0],[0,-2,0])]+[c2]:\n cc=least_squares(lambda c: np.r_[np.linalg.norm(xyz[Pcoord]-c,axis=1)-2.25,np.linalg.norm(c-c1)-2.55],seed).x\n cands.append(cc)\nheavy=[a.GetIdx() for a in mh.GetAtoms() if a.GetSymbol()!='H']\ndef clashscore(point, radius=2.0):\n ds=np.linalg.norm(xyz[heavy]-point,axis=1)\n return np.sum(np.maximum(0,radius-ds)**2),ds.min()\n# choose Co2 sites with minimal clashes and decent target lengths\nc2=min(cands,key=lambda cc: clashscore(cc)[0])\nprint('selected metal sites',c1,c2,'CoCo',np.linalg.norm(c1-c2),'N',np.linalg.norm(xyz[Ns]-c1,axis=1),'P',np.linalg.norm(xyz[Pcoord]-c2,axis=1),'clash',clashscore(c2))\n# Build bis(trimethylsilyl)hydrazido ligand as hydrazine geometry; remove N-Hs of the Co-bound imido N.\nfrag=Chem.AddHs(Chem.MolFromSmiles('NN([Si](C)(C)C)[Si](C)(C)C'))\npp=AllChem.ETKDGv3(); pp.randomSeed=444\nassert AllChem.EmbedMolecule(frag,pp)==0\nAllChem.MMFFOptimizeMolecule(frag,maxIters=500)\nfxyz=np.array(frag.GetConformer().GetPositions()); remove=[a.GetIdx() for a in frag.GetAtomWithIdx(0).GetNeighbors() if a.GetSymbol()=='H']; keep=[i for i in range(frag.GetNumAtoms()) if i not in remove]\n# choose imido direction by searching directions in the cone around the direction opposite Co1, rejecting overlaps with the existing ligand\naxis=(c2-c1); axis=axis/np.linalg.norm(axis)\n# candidate directions from opposite Co1 to the Co2-N vector, plus cone around axis; rank for least steric clash and plausible Co-Co-N angle\n# Build rotation which takes fragment N-N vector to a desired candidate direction.\nv=fxyz[1]-fxyz[0]; v=v/np.linalg.norm(v)\n# sphere sampling on cone around axis; strongly favor linear extension away from Co1\nbestdir=None\nfor theta_deg in [0,15,30,45,60,75]:\n for phi in np.linspace(0,2*np.pi,48,endpoint=False):\n  # construct orthogonal frame\n  ref=np.array([1.,0,0]) if abs(axis[0])<0.8 else np.array([0.,1,0])\n  e1=np.cross(axis,ref); e1/=np.linalg.norm(e1); e2=np.cross(axis,e1)\n  th=np.deg2rad(theta_deg); u=np.cos(th)*axis+np.sin(th)*(np.cos(phi)*e1+np.sin(phi)*e2)\n  npos=c2+1.72*u\n  # fragment N1 position and N2 toward u; score clashes for heavy fragment atoms after rotation/translation\n  rot,_=Rotation.align_vectors(u.reshape(1,3),v.reshape(1,3)); tf=rot.apply(fxyz-fxyz[0])+npos\n  # avoid existing heavy ligand and Co1/Co2\n  d=np.linalg.norm(tf[keep,None,:]-xyz[heavy][None,:,:],axis=2)\n  score=np.sum(np.maximum(0,2.0-d)**2)\n  # also make sure lower fragment does not hit cobalt1\n  score+=max(0,2.0-np.linalg.norm(npos-c1))**2\n  # slight preference for straight extension from Co-Co axis\n  score += 0.004*theta_deg**2\n  if bestdir is None or score<bestdir[0]: bestdir=(score,u,npos,tf,theta_deg)\nprint('N(imido) angle selection',bestdir[0],bestdir[4], 'theta deg')\n_,u,npos,tf,theta=bestdir\nsymbols=[a.GetSymbol() for a in mh.GetAtoms()]; coords=list(xyz)\nsymbols += ['Co','Co']; coords += [c1,c2]\nfor i in keep: symbols.append(frag.GetAtomWithIdx(i).GetSymbol()); coords.append(tf[i])\ncoords=np.array(coords)\n# final contact check among all non-hydrogen atoms (excluding metal coordination pair constraints)\nfor i in range(len(symbols)):\n if symbols[i]=='H': continue\n for j in range(i):\n  if symbols[j]=='H': continue\n  d=np.linalg.norm(coords[i]-coords[j])\n  if d<1.0: print('close contact',i,symbols[i],j,symbols[j],d)\ncoords-=coords.mean(axis=0)\nwith open('/tmp/answer_m0117.xyz','w') as f:\n f.write(f'{len(symbols)}\\n')\n f.write('Dinuclear cobalt PDI-phosphine complex with bis(trimethylsilyl)hydrazido ligand; S=1\\n')\n for e,(x,y,z) in zip(symbols,coords): f.write(f'{e:2s} {x: .8f} {y: .8f} {z: .8f}\\n')\nprint('Wrote temp',len(symbols),'atoms')\nPY\npython /tmp/m0117_build.py",
+     "timeout": 200000
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 26286,
+   "output_tokens": 3665,
+   "total_tokens": 29951,
+   "input_token_details": {
+    "cache_read": 25486
+   },
+   "output_token_details": {
+    "reasoning": 1422
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "n heavy 53 with H 119 donors [0, 3, 46] P [10, 20, 37] [20, 37]\nbest initial (np.float64(439.88014861100385), 184.3824913814793, np.float64(10.170003092818684), np.float64(2.2883048833181387), 11) N distances [1.54728944 2.99895296 3.13056173] P dists [4.06319863 4.1732093 ]\nselected metal sites [-1.48979506 -0.60538361  2.1206757 ] [0.86019665 0.63660492 0.08755737] CoCo 3.3464259517317814 N [1.54728944 2.99895296 3.13056173] P [4.06317831 4.17322577] clash (np.float64(2.7793212810733405), np.float64(0.7712347783938848))\nN(imido) angle selection 10.69252021949495 15 theta deg\nclose contact 120 Co 27 C 0.7712347783938848\nclose contact 121 N 27 C 0.9952910158442156\nclose contact 121 N 28 C 0.5666866584901804\nclose contact 122 N 28 C 0.9859792296517382\nWrote temp 149 atoms\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_025189b1c77152f7ae82500ffc4f25ca"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > /tmp/m0117_finalbuild.py <<'PY'\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem\nimport numpy as np\nfrom scipy.optimize import least_squares, minimize\nfrom scipy.spatial.transform import Rotation\nsmi='n1c(C=Nc2ccccc2P(C(C)C)C(C)C)c(CCP(C(C)C)C(C)C)c(-c2ccccc2)c(CCP(C(C)C)C(C)C)c(C=Nc2ccccc2)1'\nm=Chem.MolFromSmiles(smi); mh=Chem.AddHs(m)\nNs=[a.GetIdx() for a in m.GetAtoms() if a.GetSymbol()=='N']; Ps=[a.GetIdx() for a in m.GetAtoms() if a.GetSymbol()=='P']\nPcoord=[]\nfor p in Ps:\n    nb=m.GetAtomWithIdx(p).GetNeighbors()[0]\n    if not nb.GetIsAromatic() and nb.GetSymbol()=='C': Pcoord.append(p)\nprint('ligand:',m.GetNumAtoms(),'heavy;',mh.GetNumAtoms(),'all; N',Ns,'P',Pcoord)\npar=AllChem.ETKDGv3(); par.randomSeed=20260611; par.numThreads=4; par.pruneRmsThresh=0.4\nids=AllChem.EmbedMultipleConfs(mh,numConfs=60,params=par); props=AllChem.MMFFGetMoleculeProperties(mh)\nbest=None; n=mh.GetNumAtoms()\nfor cid in ids:\n    ff=AllChem.MMFFGetMoleculeForceField(mh,props,confId=cid)\n    ff.Minimize(maxIts=500)\n    xyz0=np.array(mh.GetConformer(cid).GetPositions())\n    # least-squares initial sites\n    c1=least_squares(lambda c: np.linalg.norm(xyz0[Ns]-c,axis=1)-1.98,xyz0[Ns].mean(0)).x\n    c2=least_squares(lambda c: np.r_[np.linalg.norm(xyz0[Pcoord]-c,axis=1)-2.25,np.linalg.norm(c-c1)-2.55],xyz0[Pcoord].mean(0)).x\n    q0=np.r_[xyz0.ravel(),c1,c2]\n    # Harmonic coordinate restraints for tridentate upper Co, two bottom phosphines, and Co-Co bond.\n    pairs=[(i,0,1.98) for i in Ns]+[(i,1,2.25) for i in Pcoord]+[(None,None,2.55)]\n    def obj(q):\n        xx=q[:3*n].reshape(n,3); m1=q[3*n:3*n+3]; m2=q[3*n+3:3*n+6]\n        pos=q[:3*n].tolist()\n        en=ff.CalcEnergy(pos); g=np.array(ff.CalcGrad(pos)).reshape(n,3)\n        g1=np.zeros(3); g2=np.zeros(3); pen=0.\n        for at,slot,target in pairs:\n            delta=(m2-m1) if at is None else ((m1 if slot==0 else m2)-xx[at])\n            d=max(np.linalg.norm(delta),1e-10); r=d-target; k=120.\n            pen+=k*r*r; gd=2*k*r*delta/d\n            if at is None: g2+=gd; g1-=gd\n            else:\n                g[at]-=gd\n                if slot==0: g1+=gd\n                else: g2+=gd\n        return en+pen,np.r_[g.ravel(),g1,g2]\n    opt=minimize(obj,q0,jac=True,method='L-BFGS-B',options={'maxiter':500,'ftol':1e-8})\n    q=opt.x; xyz=q[:3*n].reshape(n,3); c1=q[3*n:3*n+3]; c2=q[3*n+3:]\n    # Reject strongly clashing ligand conformations.\n    heavy=[a.GetIdx() for a in mh.GetAtoms() if a.GetSymbol()!='H']\n    minsep=99.\n    for ix,i in enumerate(heavy):\n        for j in heavy[:ix]:\n            if m.GetBondBetweenAtoms(i,j) is not None: continue\n            minsep=min(minsep,np.linalg.norm(xyz[i]-xyz[j]))\n    score=opt.fun+max(0.,1.8-minsep)**2*80\n    if best is None or score<best[0]: best=(score,opt.fun,minsep,cid,xyz,c1,c2)\nscore,objective,minsep,cid,xyz,c1,c2=best\nprint('best objective',objective,'min nonbonded heavy',minsep,'Co-Co',np.linalg.norm(c1-c2),'Co-N',np.linalg.norm(xyz[Ns]-c1,axis=1),'Co-P',np.linalg.norm(xyz[Pcoord]-c2,axis=1))\n# Hydrazido fragment. N1 is Co-bound (=N), N2 is N(SiMe3)2. Build free NN(SiMe3)2, then remove N1's two NH hydrogens.\nfrag=Chem.AddHs(Chem.MolFromSmiles('NN([Si](C)(C)C)[Si](C)(C)C'))\nfp=AllChem.ETKDGv3(); fp.randomSeed=20260612\nassert AllChem.EmbedMolecule(frag,fp)==0\nAllChem.MMFFOptimizeMolecule(frag,maxIters=500)\nfxyz=np.array(frag.GetConformer().GetPositions()); rem=[a.GetIdx() for a in frag.GetAtomWithIdx(0).GetNeighbors() if a.GetSymbol()=='H']; keep=[i for i in range(frag.GetNumAtoms()) if i not in rem]\n# Put Co=N-N(SiMe3)2 on the outward side of the lower cobalt; search a modest cone to avoid clashes.\naxis=c2-c1; axis/=np.linalg.norm(axis); ref=np.array([1.,0,0]) if abs(axis[0])<.8 else np.array([0.,1,0]); e1=np.cross(axis,ref); e1/=np.linalg.norm(e1); e2=np.cross(axis,e1)\nv=fxyz[1]-fxyz[0]; v/=np.linalg.norm(v)\nheavy=[a.GetIdx() for a in mh.GetAtoms() if a.GetSymbol()!='H']\nbest_h=None\nfor theta_deg in [0,10,20,30,40,50,60]:\n for phi in np.linspace(0,2*np.pi,72,endpoint=False):\n    th=np.deg2rad(theta_deg); u=np.cos(th)*axis+np.sin(th)*(np.cos(phi)*e1+np.sin(phi)*e2)\n    npos=c2+1.72*u\n    rot,_=Rotation.align_vectors(u.reshape(1,3),v.reshape(1,3)); tf=rot.apply(fxyz-fxyz[0])+npos\n    d=np.linalg.norm(tf[keep,None,:]-xyz[heavy][None,:,:],axis=2)\n    clash=np.sum(np.maximum(0.,2.0-d)**2)\n    # keep N-N reasonably trans to Co-Co, while favoring sterically clear orientation\n    scoreh=clash+0.0015*theta_deg**2\n    if best_h is None or scoreh<best_h[0]: best_h=(scoreh,u,npos,tf,theta_deg,float(d.min()))\n_,u,npos,tf,theta_deg,mingap=best_h\nprint('hydrazido direction deviation',theta_deg,'deg; nearest frag-heavy to ligand',mingap)\nsymbols=[a.GetSymbol() for a in mh.GetAtoms()]; coords=list(xyz)\nsymbols += ['Co','Co']; coords += [c1,c2]\nfor i in keep: symbols.append(frag.GetAtomWithIdx(i).GetSymbol()); coords.append(tf[i])\ncoords=np.array(coords)\n# all non-H close contacts for awareness\nclose=[]\nfor i in range(len(symbols)):\n if symbols[i]=='H': continue\n for j in range(i):\n  if symbols[j]=='H': continue\n  d=np.linalg.norm(coords[i]-coords[j])\n  if d<1.0: close.append((i,symbols[i],j,symbols[j],round(float(d),3)))\nprint('close heavy contacts <1.0 A:',close[:12])\ncoords-=coords.mean(axis=0)\nwith open('/tmp/answer_m0117.xyz','w') as f:\n f.write(f'{len(symbols)}\\n')\n f.write('Dinuclear cobalt PDI-phosphine complex with bis(trimethylsilyl)hydrazido ligand; S=1\\n')\n for e,(x,y,z) in zip(symbols,coords): f.write(f'{e:2s} {x: .8f} {y: .8f} {z: .8f}\\n')\nprint('temporary XYZ written:',len(symbols),'atoms')\nPY\npython /tmp/m0117_finalbuild.py",
+     "timeout": 200000
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 30298,
+   "output_tokens": 2902,
+   "total_tokens": 33200,
+   "input_token_details": {
+    "cache_read": 26135
+   },
+   "output_token_details": {
+    "reasoning": 826
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "ligand: 53 heavy; 119 all; N [0, 3, 46] P [20, 37]\nbest objective 207.31036720468086 min nonbonded heavy 2.263967344202284 Co-Co 2.615038563959688 Co-N [1.95819197 2.0721433  2.0577719 ] Co-P [2.30792279 2.31053478]\nhydrazido direction deviation 40 deg; nearest frag-heavy to ligand 1.1760244469169636\nclose heavy contacts <1.0 A: []\ntemporary XYZ written: 149 atoms\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_777ae846455453c390fb7d9164f7b173"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cp /tmp/answer_m0117.xyz answer.xyz && python - <<'PY'\nimport numpy as np, os\np='answer.xyz'; lines=open(p).read().splitlines(); n=int(lines[0]); rows=[x.split() for x in lines[2:]]\nassert len(rows)==n\nels=[r[0] for r in rows]; xyz=np.array([[float(v) for v in r[1:4]] for r in rows])\nprint('answer.xyz exists:',os.path.exists(p),'atoms:',n,'elements:',{e:els.count(e) for e in sorted(set(els))})\n# min non-H pair distance, exclude no pairs to flag severe overlaps\nheavy=[i for i,e in enumerate(els) if e!='H']; pairs=[]\nfor ii,i in enumerate(heavy):\n for j in heavy[:ii]: pairs.append((np.linalg.norm(xyz[i]-xyz[j]),i,els[i],j,els[j]))\nprint('minimum non-H separation:',sorted(pairs)[0])\nprint('Co-Co distance:',np.linalg.norm(xyz[[i for i,e in enumerate(els) if e=='Co'][0]]-xyz[[i for i,e in enumerate(els) if e=='Co'][1]]))\nPY"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 33352,
+   "output_tokens": 540,
+   "total_tokens": 33892,
+   "input_token_details": {
+    "cache_read": 30147
+   },
+   "output_token_details": {
+    "reasoning": 241
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "answer.xyz exists: True atoms: 149 elements: {'C': 53, 'Co': 2, 'H': 84, 'N': 5, 'P': 3, 'Si': 2}\nminimum non-H separation: (np.float64(1.2905380007121414), 121, 'N', 20, 'P')\nCo-Co distance: 2.6150385634784237\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_ab7804cabaed5782ae7661a774ec3128"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > /tmp/m0117_orient.py <<'PY'\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem\nfrom scipy.spatial.transform import Rotation\nimport numpy as np\nlines=open('answer.xyz').read().splitlines(); rows=[x.split() for x in lines[2:]]\nels=[r[0] for r in rows]; X=np.array([[float(t) for t in r[1:4]] for r in rows])\n# ligand indices 0..118, metals 119,120; hydrazido fragment starts at 121\nc1=X[119]; c2=X[120]; ligandH=np.arange(119); ligandheavy=np.array([i for i in ligandH if els[i]!='H'])\nfrag=Chem.AddHs(Chem.MolFromSmiles('NN([Si](C)(C)C)[Si](C)(C)C'))\np=AllChem.ETKDGv3(); p.randomSeed=20260612; AllChem.EmbedMolecule(frag,p); AllChem.MMFFOptimizeMolecule(frag,maxIters=500)\nfxyz=np.array(frag.GetConformer().GetPositions()); rem=[a.GetIdx() for a in frag.GetAtomWithIdx(0).GetNeighbors() if a.GetSymbol()=='H']; keep=np.array([i for i in range(frag.GetNumAtoms()) if i not in rem]); fheavy=np.array([i for i in keep if frag.GetAtomWithIdx(int(i)).GetSymbol()!='H'])\naxis=(c2-c1)/np.linalg.norm(c2-c1); ref=np.array([1.,0,0]) if abs(axis[0])<.8 else np.array([0.,1,0]); e1=np.cross(axis,ref); e1/=np.linalg.norm(e1); e2=np.cross(axis,e1)\nv=fxyz[1]-fxyz[0]; v/=np.linalg.norm(v)\nbest=None\nfor theta_deg in np.linspace(0,180,37):\n for phi in np.linspace(0,2*np.pi,144,endpoint=False):\n  th=np.deg2rad(theta_deg); u=np.cos(th)*axis+np.sin(th)*(np.cos(phi)*e1+np.sin(phi)*e2)\n  npos=c2+1.72*u; rot,_=Rotation.align_vectors(u.reshape(1,3),v.reshape(1,3)); tf=rot.apply(fxyz-fxyz[0])+npos\n  # Heavy-heavy cutoff 2.0, H-heavy 1.65, as well as contacts to Co1\n  d1=np.linalg.norm(tf[fheavy,None,:]-X[ligandheavy][None,:,:],axis=2)\n  d2=np.linalg.norm(tf[keep,None,:]-X[ligandheavy][None,:,:],axis=2)\n  fheavy_map={int(k):ii for ii,k in enumerate(keep)}\n  score=np.sum(np.maximum(0,2.0-d1)**2)*10 + np.sum(np.maximum(0,1.65-d2)**2)*2\n  # tetrahedral angle expected: u (Co2->N) and Co2->Co1 (-axis) near 109.5 deg => theta ~70.5\n  score+=0.003*(theta_deg-70.5)**2\n  # avoid N-imido to Co1 close\n  score+=max(0,2.7-np.linalg.norm(npos-c1))**2*10\n  if best is None or score<best[0]: best=(score,theta_deg,phi,u,npos,tf,float(d1.min()),float(d2.min()))\nprint('best direction score, theta, min heavy-heavy, min frag-any-ligand',best[0],best[1],best[6],best[7])\n_,theta,phi,u,npos,tf,_,_=best\n# check close heavy contacts\nfor ii,i in enumerate(fheavy):\n for j in ligandheavy:\n  d=np.linalg.norm(tf[i]-X[j])\n  if d<1.9: print('contact frag atom',i,frag.GetAtomWithIdx(int(i)).GetSymbol(),'lig idx',j,els[j],'d',d)\n# write new coords maintaining symbol order\ncoords=np.vstack([X[:119],X[119:121],tf[keep]])\n# ensure fragment atom output order same as original answer: fragment retained list was sequential keep indices\nassert len(coords)==len(rows)\ncoords-=coords.mean(0)\nwith open('/tmp/answer_m0117_oriented.xyz','w') as f:\n f.write(f'{len(els)}\\n');f.write('Dinuclear cobalt PDI-phosphine complex with bis(trimethylsilyl)hydrazido ligand; S=1\\n')\n for e,(x,y,z) in zip(els,coords): f.write(f'{e:2s} {x: .8f} {y: .8f} {z: .8f}\\n')\nPY\npython /tmp/m0117_orient.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 33996,
+   "output_tokens": 2786,
+   "total_tokens": 36782,
+   "input_token_details": {
+    "cache_read": 33201
+   },
+   "output_token_details": {
+    "reasoning": 1664
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "best direction score, theta, min heavy-heavy, min frag-any-ligand 9.141922266794364 95.0 1.4132921658477389 1.4132921658477389\ncontact frag atom 0 N lig idx 23 C d 1.4132921658477389\ncontact frag atom 1 N lig idx 23 C d 1.7896580814720138\ncontact frag atom 3 C lig idx 23 C d 1.7743500378508628\ncontact frag atom 6 Si lig idx 43 C d 1.664887199242315\ncontact frag atom 7 C lig idx 43 C d 1.8024195942760959\ncontact frag atom 9 C lig idx 43 C d 1.6478540107299338\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_aed6c51107195edbb0bab75004f9b4f5"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python - <<'PY'\nimport numpy as np\nl=open('answer.xyz').read().splitlines(); rows=[x.split() for x in l[2:]]; e=[r[0] for r in rows]; x=np.array([[float(v) for v in r[1:4]] for r in rows]);\nfor m in [119,120]:\n d=np.linalg.norm(x[:119]-x[m],axis=1); ix=np.argsort(d)[:8]; print('Co',m,[(int(i),e[i],round(float(d[i]),2)) for i in ix]);\nfor m in [119,120]:\n for p in [i for i in range(119) if e[i]=='P']:\n  print(m,'P',p,np.linalg.norm(x[m]-x[p]))\nPY"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 36971,
+   "output_tokens": 304,
+   "total_tokens": 37275,
+   "input_token_details": {
+    "cache_read": 33845
+   },
+   "output_token_details": {
+    "reasoning": 103
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "Co 119 [(0, 'N', 1.96), (46, 'N', 2.06), (3, 'N', 2.07), (80, 'H', 2.18), (1, 'C', 2.34), (44, 'C', 2.45), (2, 'C', 2.48), (45, 'C', 2.6)]\nCo 120 [(80, 'H', 1.65), (20, 'P', 2.31), (37, 'P', 2.31), (23, 'C', 2.45), (21, 'C', 2.75), (110, 'H', 2.81), (34, 'C', 2.86), (82, 'H', 2.94)]\n119 P 10 5.085086497409306\n119 P 20 4.287117663616786\n119 P 37 4.377454113422997\n120 P 10 7.05008101152036\n120 P 20 2.3079227941999854\n120 P 37 2.310534784617042\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_e2567d1d25ae54f49aee75998397e861"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python - <<'PY'\nimport numpy as np\nfrom scipy.optimize import least_squares\nl=open('answer.xyz').read().splitlines(); r=[x.split() for x in l[2:]]; e=[x[0] for x in r]; x=np.array([[float(a) for a in t[1:4]] for t in r]); c1=x[119]; ps=[20,37]\ndef f(c): return np.r_[np.linalg.norm(x[ps]-c,axis=1)-2.25,np.linalg.norm(c-c1)-2.55]\nfor seed in [x[ps].mean(0)+v for v in [[0,0,4],[0,0,-4],[4,0,0],[-4,0,0],[0,4,0],[0,-4,0]]]:\n c=least_squares(f,seed).x; ds=np.linalg.norm(x[:119]-c,axis=1); print('c',c,'res',f(c),'near ligand',[(i,e[i],round(ds[i],2)) for i in np.argsort(ds)[:5]])\nPY"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 37548,
+   "output_tokens": 609,
+   "total_tokens": 38157,
+   "input_token_details": {
+    "cache_read": 36820
+   },
+   "output_token_details": {
+    "reasoning": 343
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "c [-1.03640019 -0.29814352  0.10962142] res [0.05784063 0.06075758 0.06490319] near ligand [(np.int64(80), 'H', np.float64(1.65)), (np.int64(20), 'P', np.float64(2.31)), (np.int64(37), 'P', np.float64(2.31)), (np.int64(23), 'C', np.float64(2.45)), (np.int64(21), 'C', np.float64(2.75))]\nc [-1.03639837 -0.29814668  0.10961352] res [0.05784063 0.06075757 0.0649032 ] near ligand [(np.int64(80), 'H', np.float64(1.65)), (np.int64(20), 'P', np.float64(2.31)), (np.int64(37), 'P', np.float64(2.31)), (np.int64(23), 'C', np.float64(2.45)), (np.int64(21), 'C', np.float64(2.75))]\nc [-1.03639794 -0.29814742  0.10961167] res [0.05784063 0.06075757 0.0649032 ] near ligand [(np.int64(80), 'H', np.float64(1.65)), (np.int64(20), 'P', np.float64(2.31)), (np.int64(37), 'P', np.float64(2.31)), (np.int64(23), 'C', np.float64(2.45)), (np.int64(21), 'C', np.float64(2.75))]\nc [-1.03639765 -0.29814792  0.10961043] res [0.05784062 0.06075758 0.0649032 ] near ligand [(np.int64(80), 'H', np.float64(1.65)), (np.int64(20), 'P', np.float64(2.31)), (np.int64(37), 'P', np.float64(2.31)), (np.int64(23), 'C', np.float64(2.45)), (np.int64(21), 'C', np.float64(2.75))]\nc [-1.03639926 -0.29814514  0.10961735] res [0.05784063 0.06075757 0.0649032 ] near ligand [(np.int64(80), 'H', np.float64(1.65)), (np.int64(20), 'P', np.float64(2.31)), (np.int64(37), 'P', np.float64(2.31)), (np.int64(23), 'C', np.float64(2.45)), (np.int64(21), 'C', np.float64(2.75))]\nc [-1.03640301 -0.29813866  0.10963351] res [0.05784063 0.06075757 0.0649032 ] near ligand [(np.int64(80), 'H', np.float64(1.65)), (np.int64(20), 'P', np.float64(2.31)), (np.int64(37), 'P', np.float64(2.31)), (np.int64(23), 'C', np.float64(2.45)), (np.int64(21), 'C', np.float64(2.75))]\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_b31b14e5a3f75613ae3fbf5410707c82"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > /tmp/m0117_orienttwist.py <<'PY'\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem\nfrom scipy.spatial.transform import Rotation\nimport numpy as np\nlines=open('answer.xyz').read().splitlines(); rows=[x.split() for x in lines[2:]]; els=[r[0] for r in rows]; X=np.array([[float(t) for t in r[1:4]] for r in rows]); c1=X[119]; c2=X[120]; lig=np.arange(119); lh=np.array([i for i in lig if els[i]!='H'])\nfrag=Chem.AddHs(Chem.MolFromSmiles('NN([Si](C)(C)C)[Si](C)(C)C')); p=AllChem.ETKDGv3();p.randomSeed=20260612;AllChem.EmbedMolecule(frag,p);AllChem.MMFFOptimizeMolecule(frag,maxIters=500); F=np.array(frag.GetConformer().GetPositions()); rem=[a.GetIdx() for a in frag.GetAtomWithIdx(0).GetNeighbors() if a.GetSymbol()=='H']; keep=np.array([i for i in range(len(F)) if i not in rem]); fh=np.array([i for i in keep if frag.GetAtomWithIdx(int(i)).GetSymbol()!='H']); axis=(c2-c1)/np.linalg.norm(c2-c1); ref=np.array([1.,0,0]) if abs(axis[0])<.8 else np.array([0.,1,0]);e1=np.cross(axis,ref);e1/=np.linalg.norm(e1);e2=np.cross(axis,e1);v=F[1]-F[0];v/=np.linalg.norm(v)\nbest=None\nfor theta in np.linspace(0,180,25):\n th=np.deg2rad(theta)\n for phi in np.linspace(0,2*np.pi,48,endpoint=False):\n  u=np.cos(th)*axis+np.sin(th)*(np.cos(phi)*e1+np.sin(phi)*e2); npos=c2+1.72*u\n  align,_=Rotation.align_vectors(u.reshape(1,3),v.reshape(1,3)); base=align.apply(F-F[0])+npos\n  for psi in np.linspace(0,2*np.pi,24,endpoint=False):\n   twist=Rotation.from_rotvec(u*psi); tf=twist.apply(base-npos)+npos\n   dh=np.linalg.norm(tf[fh,None,:]-X[lh][None,:,:],axis=2)\n   da=np.linalg.norm(tf[keep,None,:]-X[lh][None,:,:],axis=2)\n   sc=20*np.sum(np.maximum(0,2.0-dh)**2)+2*np.sum(np.maximum(0,1.65-da)**2)+0.001*(theta-70.5)**2\n   sc+=10*max(0,2.7-np.linalg.norm(npos-c1))**2\n   if best is None or sc<best[0]:best=(sc,theta,phi,psi,u,npos,tf,dh.min(),da.min())\nprint('best',best[0], 'theta',best[1], 'min heavy gap',best[7], 'min any gap',best[8])\n_,th,ph,ps,u,npos,tf,_,_=best\nfor ii,i in enumerate(fh):\n for jj,j in enumerate(lh):\n  d=np.linalg.norm(tf[i]-X[j])\n  if d<1.9: print('contact',i,frag.GetAtomWithIdx(int(i)).GetSymbol(),j,els[j],round(float(d),3))\ncoords=np.vstack([X[:121],tf[keep]]); coords-=coords.mean(0)\nwith open('/tmp/answer_m0117_oriented.xyz','w') as f:\n f.write(f'{len(els)}\\nDinuclear cobalt PDI-phosphine complex with bis(trimethylsilyl)hydrazido ligand; S=1\\n')\n for e,(x,y,z) in zip(els,coords):f.write(f'{e:2s} {x: .8f} {y: .8f} {z: .8f}\\n')\nPY\npython /tmp/m0117_orienttwist.py",
+     "timeout": 200000
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 38967,
+   "output_tokens": 3402,
+   "total_tokens": 42369,
+   "input_token_details": {
+    "cache_read": 37397
+   },
+   "output_token_details": {
+    "reasoning": 2427
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "best 0.4727999382493473 theta 67.5 min heavy gap 1.865005666314562 min any gap 1.4727763910016538\ncontact 9 C 43 C 1.865\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_d6943d4b109d5cd9a548e98f04e300ce"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cp /tmp/answer_m0117_oriented.xyz answer.xyz && python - <<'PY'\nimport os,numpy as np\nf='answer.xyz'; lines=open(f).read().splitlines(); n=int(lines[0]); rows=[q.split() for q in lines[2:]]\nassert os.path.isfile(f) and len(rows)==n\nE=[q[0] for q in rows]; X=np.array([[float(z) for z in q[1:4]] for q in rows])\nprint('Verified answer.xyz:',os.path.abspath(f),'atoms=',n,'elements=',{e:E.count(e) for e in sorted(set(E))})\ninds=[i for i,e in enumerate(E) if e!='H']; q=min((np.linalg.norm(X[i]-X[j]),i,j) for k,i in enumerate(inds) for j in inds[:k]); print('min non-H separation',q)\nPY"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 42432,
+   "output_tokens": 428,
+   "total_tokens": 42860,
+   "input_token_details": {
+    "cache_read": 38816
+   },
+   "output_token_details": {
+    "reasoning": 210
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "Verified answer.xyz: /h/400/skaxu/elagenteworkdir/mol_0117_004abd60_gpt-6-luna/answer.xyz atoms= 149 elements= {'C': 53, 'Co': 2, 'H': 84, 'N': 5, 'P': 3, 'Si': 2}\nmin non-H separation (np.float64(1.299143529639523), 3, 2)\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_2ca4e66164215646b1071ac33ebd24f3"
+ },
+ {
+  "type": "AIMessage",
+  "content": "Created `answer.xyz` in the working directory with 149 atoms, including explicit hydrogens.",
+  "usage": {
+   "input_tokens": 42970,
+   "output_tokens": 236,
+   "total_tokens": 43206,
+   "input_token_details": {
+    "cache_read": 42281
+   },
+   "output_token_details": {
+    "reasoning": 210
+   }
+  }
+ }
+]

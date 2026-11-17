@@ -1,0 +1,899 @@
+[
+ {
+  "type": "SystemMessage",
+  "content": "You are a helpful chemistry assistant. You build 3D molecular\n  structures from the chemical information you are given, including 2D drawings\n  supplied as images.\n\n  When you are given a 2D drawing of a molecule, your task is to produce the 3D\n  structure that drawing depicts and save it as `answer.xyz` in your working\n  directory.\n\n  Requirements for `answer.xyz`:\n  - Include all explicit hydrogens.\n  - Use a right-handed Cartesian coordinate system, units of angstroms.\n  - Standard XYZ format: first line is the total atom count, second line a\n    one-line comment, each remaining line `Element X Y Z`.\n\n  When you are done, confirm that `answer.xyz` exists in the working directory.\n  \n\n[IMPORTANT CONSTRAINT] You must NOT call multiple tools in parallel. Execute tools ONE AT A TIME, sequentially. Wait for each tool's result before calling the next tool. Never batch multiple tool calls in a single response."
+ },
+ {
+  "type": "HumanMessage",
+  "content": "A 2D structure of a molecule is provided as a PNG file in your working directory: mol_0149.png\n\nBuild the 3D structure it depicts and save it as answer.xyz.\n"
+ },
+ {
+  "type": "AIMessage",
+  "content": "I'll start by exploring the working directory and viewing the molecule structure.\n\n",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "ls -la"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 1781,
+   "output_tokens": 60,
+   "total_tokens": 1841,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 1024
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 14
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "total 82\ndrwxr-xr-x   2 root root     3 Sep 27 18:00 .\ndrwxr-xr-x 151 root root   151 Sep 27 18:00 ..\n-rw-r--r--   1 root root 91441 Sep 27 18:00 mol_0149.png\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_4424339ef0474040a40ac598"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "view_png_file",
+    "args": {
+     "png_file_relative_path": "mol_0149.png"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 1936,
+   "output_tokens": 55,
+   "total_tokens": 1991,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 1024
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 17
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[image]",
+  "name": "view_png_file",
+  "tool_call_id": "call_7818e5af7f58471a93a8bf42"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "which python3 obabel xtb; python3 -c \"import rdkit; print(rdkit.__version__)\" 2>&1 | tail -1"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 3186,
+   "output_tokens": 8756,
+   "total_tokens": 11942,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 1152
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 8693
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "/h/400/skaxu/miniforge3/envs/elagente_env/bin/python3\n/h/400/skaxu/miniforge3/envs/elagente_env/bin/obabel\n/h/400/skaxu/miniforge3/envs/elagente_env/bin/xtb\n2026.03.1\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_931bab13a57145189f8a11ea"
+ },
+ {
+  "type": "AIMessage",
+  "content": "The image shows a 7-coordinate Sn complex: two phenyl groups, a bidentate ethylenediamine (drawn as NH2+ on both ends), and a tridentate azo-bis(bromophenolate) ligand (O, N, O donors, with two Br-substituted phenolate rings linked by an N=N azo group, one of whose azo N coordinates to Sn).\n\nMy plan: build the 3D coordinates fragment by fragment (fitting RDKit-embedded fragments onto the coordination sites of a pentagonal bipyramid around Sn), then refine with constrained xTB.\n\n",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > build.py << 'EOF'\nimport numpy as np\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem\n\ndef embed(smiles, seed=42):\n    m = Chem.MolFromSmiles(smiles)\n    m = Chem.AddHs(m)\n    AllChem.EmbedMolecule(m, randomSeed=seed, useRandomCoords=False)\n    AllChem.MMFFOptimizeMolecule(m)\n    return m\n\ndef coords(m):\n    c = m.GetConformer()\n    return np.array([[c.GetAtomPosition(i).x, c.GetAtomPosition(i).y, c.GetAtomPosition(i).z]\n                     for i in range(m.GetNumAtoms())])\n\ndef kabsch(P, Q):\n    # returns R,t mapping P onto Q (P,Q Nx3)\n    Pc = P.mean(0); Qc = Q.mean(0)\n    H = (P-Pc).T @ (Q-Qc)\n    U,S,Vt = np.linalg.svd(H)\n    d = np.sign(np.linalg.det(Vt.T@U.T))\n    D = np.diag([1,1,d])\n    R = Vt.T@D@U.T\n    t = Qc - R@Pc\n    return R, t\n\ndef rot_axis_angle(axis, ang):\n    axis = axis/np.linalg.norm(axis)\n    K = np.array([[0,-axis[2],axis[1]],[axis[2],0,-axis[0]],[-axis[1],axis[0],0]])\n    return np.eye(3)+np.sin(ang)*K+(1-np.cos(ang))*(K@K)\n\ndef align_vec(v1, v2):\n    v1 = v1/np.linalg.norm(v1); v2 = v2/np.linalg.norm(v2)\n    ax = np.cross(v1,v2)\n    ang = np.arccos(np.clip(np.dot(v1,v2),-1,1))\n    if np.linalg.norm(ax) < 1e-8:\n        return np.eye(3) if ang<1e-8 else -np.eye(3)\n    return rot_axis_angle(ax, ang)\n\n# ---------- coordination site targets ----------\ndef u(deg):\n    r = np.radians(deg)\n    return np.array([np.cos(r), np.sin(r), 0.0])\n\nSn   = np.array([0,0,0.0])\nt_O1   = 2.05*u(90)\nt_Nazo = 2.25*u(162)\nt_O2   = 2.05*u(234)\nt_Nen1 = 2.30*u(306)\nt_Nen2 = 2.30*u(18)\nt_Cph1 = np.array([0,0,2.15])\nt_Cph2 = np.array([0,0,-2.15])\n\natoms = []  # (element, coord)\natoms.append(('Sn', Sn))\niSn = 0\n\n# ---------- phenyl rings (analytic) ----------\ndef phenyl(ipso, axis, normal):\n    a = axis/np.linalg.norm(axis)\n    n = normal/np.linalg.norm(normal)\n    n = n - (n@a)*a\n    n /= np.linalg.norm(n)\n    w = np.cross(n, a)\n    center = ipso + 1.39*a\n    e1 = -a\n    out = []\n    ring = []\n    for k in range(6):\n        c = center + 1.39*(np.cos(np.radians(60*k))*e1 + np.sin(np.radians(60*k))*w)\n        ring.append(c)\n    for k in range(6):\n        out.append(('C', ring[k]))\n    for k in range(1,6):\n        d = (ring[k]-center)/np.linalg.norm(ring[k]-center)\n        out.append(('H', ring[k]+1.09*d))\n    return out, ring\n\nph1, ring1 = phenyl(t_Cph1, t_Cph1-Sn, np.array([0,1,0.0]))\nph2, ring2 = phenyl(t_Cph2, t_Cph2-Sn, np.array([1,0,0.0]))\ni_Cph1 = len(atoms); atoms += ph1\ni_Cph2 = len(atoms); atoms += ph2\n\n# ---------- ethylenediamine ----------\nen = embed('NCCN')\nX = coords(en)\nidxN = [a.GetIdx() for a in en.GetAtoms() if a.GetSymbol()=='N']\nP = X[idxN]\nQ = np.array([t_Nen1, t_Nen2])\n# 2-point alignment: translate+rotate vector, then spin about axis\nv1 = P[1]-P[0]; v2 = Q[1]-Q[0]\nR = align_vec(v1, v2)\nX2 = (R@X.T).T\nP2 = X2[idxN]\ntvec = Q[0]-P2[0]\nX2 = X2 + tvec\nP2 = X2[idxN]\naxis = (Q[1]-Q[0]); axis/=np.linalg.norm(axis)\nM = (Q[0]+Q[1])/2\n# perpendicular outward direction (away from Sn)\nmvec = M - Sn\np_des = mvec - (mvec@axis)*axis; p_des/=np.linalg.norm(p_des)\niC = [a.GetIdx() for a in en.GetAtoms() if a.GetSymbol()=='C']\ncen = X2[iC].mean(0)\npc = cen - M; pc = pc - (pc@axis)*axis\nif np.linalg.norm(pc)>1e-6:\n    pc/=np.linalg.norm(pc)\n    ang = np.arccos(np.clip(pc@p_des,-1,1))\n    sgn = np.sign(np.dot(axis, np.cross(pc,p_des)))\n    Rs = rot_axis_angle(axis, sgn*ang)\n    X2 = ((Rs@(X2-M).T).T)+M\norder = [a.GetSymbol() for a in en.GetAtoms()]\ni_Nen1 = len(atoms)+idxN[0]; i_Nen2 = len(atoms)+idxN[1]\nfor s,c in zip(order, X2): atoms.append((s,c))\n\n# ---------- pincer (azo-bis phenolate) ----------\npin = embed('Oc1c(/N=N/c2ccc(Br)cc2O)cc(Br)cc1')\nY = coords(pin)\nsym = [a.GetSymbol() for a in pin.GetAtoms()]\n# identify: O atoms; azo N atoms\nidxO = [i for i,s in enumerate(sym) if s=='O']\nidxNazo = [i for i,s in enumerate(sym) if s=='N']\n# azo N bonded to ring A = the one bonded to atom index 1 (ring A C2)? determine by neighbors\nmol_pin = pin\ndef neighbors(i):\n    return [b.GetOtherAtomIdx(i) for b in mol_pin.GetAtomWithIdx(i).GetBonds()]\n# ring A O is atom 0 by SMILES order; ring B O is the last O\niO_A = idxO[0]; iO_B = idxO[-1]\n# coordinated azo N = N bonded to ring A carbon (neighbor of iO_A ring): find N whose neighbor set intersects ring A\n# ring A atoms: iO_A's carbon and its ring\ncA = neighbors(iO_A)[0]\nringA = set()\n# walk: use RDKit ring info\nri = mol_pin.GetRingInfo()\nfor ring in ri.AtomRings():\n    if cA in ring: ringA = set(ring)\nnN = [i for i in idxNazo if set(neighbors(i)) & ringA]\niN_co = nN[0]\n# remove phenolic Hs\nkeep = []\nfor i,a in enumerate(mol_pin.GetAtoms()):\n    if a.GetSymbol()=='H' and (neighbors(i)[0] in (iO_A,iO_B)):\n        continue\n    keep.append(i)\nYk = Y[keep]\nsymk = [sym[i] for i in keep]\nmap_old = {old:new for new,old in enumerate(keep)}\nP = Yk[[map_old[iO_A], map_old[iN_co], map_old[iO_B]]]\nQ = np.array([t_O1, t_Nazo, t_O2])\nR,t = kabsch(P,Q)\nY2 = (R@Yk.T).T + t\ni_O1 = len(atoms)+map_old[iO_A]\ni_Nazo = len(atoms)+map_old[iN_co]\ni_O2 = len(atoms)+map_old[iO_B]\nfor s,c in zip(symk, Y2): atoms.append((s,c))\n\n# ---------- write ----------\nwith open('init.xyz','w') as f:\n    f.write(f\"{len(atoms)}\\ninitial Sn complex\\n\")\n    for s,c in atoms:\n        f.write(f\"{s} {c[0]:.6f} {c[1]:.6f} {c[2]:.6f}\\n\")\n\nprint(\"natoms\", len(atoms))\nprint(\"iSn\",iSn,\"i_Cph1\",i_Cph1,\"i_Cph2\",i_Cph2,\"i_Nen1\",i_Nen1,\"i_Nen2\",i_Nen2,\n      \"i_O1\",i_O1,\"i_Nazo\",i_Nazo,\"i_O2\",i_O2)\nfrom collections import Counter\nprint(Counter([s for s,_ in atoms]))\nEOF\npython3 build.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 3343,
+   "output_tokens": 13002,
+   "total_tokens": 16345,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 3072
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 10635
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "natoms 59\niSn 0 i_Cph1 1 i_Cph2 12 i_Nen1 23 i_Nen2 26 i_O1 35 i_Nazo 38 i_O2 47\nCounter({'C': 26, 'H': 24, 'N': 4, 'O': 2, 'Br': 2, 'Sn': 1})\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_1cb6379c024c4b77a55888a2"
+ },
+ {
+  "type": "AIMessage",
+  "content": "Atom count checks out (C26 H24 N4 O2 Br2 Sn = 59). Let me inspect the geometry for clashes and bond distances.\n\n",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python3 - << 'EOF'\nimport numpy as np\nlines = open('init.xyz').read().split('\\n')[2:]\nels=[]; X=[]\nfor l in lines:\n    p=l.split()\n    if len(p)>=4:\n        els.append(p[0]); X.append([float(v) for v in p[1:4]])\nX=np.array(X)\nd = lambda a,b: np.linalg.norm(X[a]-X[b])\nprint(\"Sn-O1\",d(0,35),\"Sn-Nazo\",d(0,38),\"Sn-O2\",d(0,47),\"Sn-Nen1\",d(0,23),\"Sn-Nen2\",d(0,26),\"Sn-Cph1\",d(0,1),\"Sn-Cph2\",d(0,12))\n# min nonbonded distance check\nimport itertools\ncov = {'H':0.31,'C':0.76,'N':0.71,'O':0.66,'Br':1.20,'Sn':1.39}\nworst=[]\nfor i,j in itertools.combinations(range(len(X)),2):\n    dd=np.linalg.norm(X[i]-X[j])\n    lim = 0.75*(cov[els[i]]+cov[els[j]])\n    if dd < lim: worst.append((round(dd,2), els[i],i,els[j],j))\nprint(\"too close:\", worst[:20], len(worst))\nEOF"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 5819,
+   "output_tokens": 530,
+   "total_tokens": 6349,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 3072
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 134
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "Sn-O1 2.6946188956158528 Sn-Nazo 2.3787756132062983 Sn-O2 2.9739854581436673 Sn-Nen1 2.2999998823819534 Sn-Nen2 2.3783750532176375 Sn-Cph1 2.15 Sn-Cph2 2.15\ntoo close: [] 0\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_f41e6dc9c10f429c80d70f1c"
+ },
+ {
+  "type": "AIMessage",
+  "content": "The pincer's rigid bite doesn't match uniform 72\u00b0 equatorial spacing. I'll solve donor radii from the ligand's own chord distances and use realistic bite angles.\n\n",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > build2.py << 'EOF'\nimport numpy as np\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem\nfrom scipy.optimize import fsolve\n\ndef embed(smiles, seed=42):\n    m = Chem.MolFromSmiles(smiles)\n    m = Chem.AddHs(m)\n    AllChem.EmbedMolecule(m, randomSeed=seed)\n    AllChem.MMFFOptimizeMolecule(m)\n    return m\n\ndef coords(m):\n    c = m.GetConformer()\n    return np.array([[c.GetAtomPosition(i).x, c.GetAtomPosition(i).y, c.GetAtomPosition(i).z]\n                     for i in range(m.GetNumAtoms())])\n\ndef kabsch(P, Q):\n    Pc = P.mean(0); Qc = Q.mean(0)\n    H = (P-Pc).T @ (Q-Qc)\n    U,S,Vt = np.linalg.svd(H)\n    d = np.sign(np.linalg.det(Vt.T@U.T))\n    R = Vt.T@np.diag([1,1,d])@U.T\n    return R, Qc - R@Pc\n\ndef rot_axis_angle(axis, ang):\n    axis = axis/np.linalg.norm(axis)\n    K = np.array([[0,-axis[2],axis[1]],[axis[2],0,-axis[0]],[-axis[1],axis[0],0]])\n    return np.eye(3)+np.sin(ang)*K+(1-np.cos(ang))*(K@K)\n\ndef align_vec(v1, v2):\n    v1 = v1/np.linalg.norm(v1); v2 = v2/np.linalg.norm(v2)\n    ax = np.cross(v1,v2); ang = np.arccos(np.clip(np.dot(v1,v2),-1,1))\n    if np.linalg.norm(ax) < 1e-8: return np.eye(3)\n    return rot_axis_angle(ax, ang)\n\ndef u(deg):\n    r = np.radians(deg); return np.array([np.cos(r), np.sin(r), 0.0])\n\n# ---------------- pincer embed & identify ----------------\npin = embed('Oc1c(/N=N/c2ccc(Br)cc2O)cc(Br)cc1')\nY = coords(pin); sym = [a.GetSymbol() for a in pin.GetAtoms()]\ndef nbrs(m,i): return [b.GetOtherAtomIdx(i) for b in m.GetAtomWithIdx(i).GetBonds()]\nidxO = [i for i,s in enumerate(sym) if s=='O']\nidxN = [i for i,s in enumerate(sym) if s=='N']\niO_A, iO_B = idxO[0], idxO[-1]\ncA = nbrs(pin,iO_A)[0]\nringA = set()\nfor ring in pin.GetRingInfo().AtomRings():\n    if cA in ring: ringA = set(ring)\niN_co = [i for i in idxN if set(nbrs(pin,i)) & ringA][0]\nkeep = [i for i in range(len(sym)) if not (sym[i]=='H' and nbrs(pin,i)[0] in (iO_A,iO_B))]\nYk = Y[keep]; symk = [sym[i] for i in keep]\nmold = {o:n for n,o in enumerate(keep)}\nPpin = Yk[[mold[iO_A], mold[iN_co], mold[iO_B]]]\nc12 = np.linalg.norm(Ppin[0]-Ppin[1]); c23 = np.linalg.norm(Ppin[1]-Ppin[2]); c13 = np.linalg.norm(Ppin[0]-Ppin[2])\nprint(\"pincer chords O1-N, N-O2, O1-O2:\", round(c12,3), round(c23,3), round(c13,3))\n\n# equatorial directions\naO1, aN, aO2 = 90.0, 162.0, 234.0\nu1,u2,u3 = u(aO1), u(aN), u(aO2)\ndef eqs(r):\n    r1,r2,r3 = r\n    return [np.linalg.norm(r1*u1-r2*u2)-c12,\n            np.linalg.norm(r2*u2-r3*u3)-c23,\n            np.linalg.norm(r1*u1-r3*u3)-c13]\nr_sol, info, ier, msg = fsolve(eqs, [2.0,2.2,2.0], full_output=True)\nassert ier==1, msg\nprint(\"solved radii:\", r_sol)\nT = np.array([r_sol[0]*u1, r_sol[1]*u2, r_sol[2]*u3])\n\n# ---------------- en embed ----------------\nen = embed('NCCN')\nXe = coords(en)\nidxNe = [a.GetIdx() for a in en.GetAtoms() if a.GetSymbol()=='N']\ndNN = np.linalg.norm(Xe[idxNe[0]]-Xe[idxNe[1]])\nprint(\"en N-N chord:\", round(dNN,3))\n# en sites: span angle from chord at r=2.3\nr_en = 2.30\nhalf = np.arcsin(min(1,(dNN/2)/r_en))\nspan = 2*np.degrees(half)\nprint(\"en span deg:\", round(span,2))\n# equatorial layout: O2 at 234; gap g1 to Nen1; en span; gap g2 back to O1(90+360=450)\n# 234 + g1 + span + g2 = 450  with g1=g2\ng = (450-234-span)/2\naN1 = 234+g; aN2 = aN1+span\nprint(\"en angles:\", round(aN1,2), round(aN2,2))\ntN1, tN2 = r_en*u(aN1), r_en*u(aN2)\n\n# ---------------- assemble ----------------\natoms=[('Sn', np.zeros(3))]\ndef phenyl(ipso, axis, normal):\n    a = axis/np.linalg.norm(axis); n = normal/np.linalg.norm(normal)\n    n = n-(n@a)*a; n/=np.linalg.norm(n); w = np.cross(n,a)\n    center = ipso+1.39*a; e1=-a; ring=[]\n    for k in range(6):\n        ring.append(center+1.39*(np.cos(np.radians(60*k))*e1+np.sin(np.radians(60*k))*w))\n    out=[('C',c) for c in ring]\n    for k in range(1,6):\n        d=(ring[k]-center)/np.linalg.norm(ring[k]-center); out.append(('H',ring[k]+1.09*d))\n    return out\ntC1 = np.array([0,0,2.15]); tC2 = np.array([0,0,-2.15])\ni_Cph1 = len(atoms); atoms += phenyl(tC1, tC1, np.array([0,1,0.0]))\ni_Cph2 = len(atoms); atoms += phenyl(tC2, tC2, np.array([1,0,0.0]))\n\n# en placement\nX = Xe.copy()\nP = X[idxNe]; Q = np.array([tN1,tN2])\nR = align_vec(P[1]-P[0], Q[1]-Q[0]); X = (R@X.T).T\nX += Q[0]-X[idxNe[0]]\naxis = (Q[1]-Q[0]); axis/=np.linalg.norm(axis); M=(Q[0]+Q[1])/2\nmvec = M - np.zeros(3); p_des = mvec-(mvec@axis)*axis; p_des/=np.linalg.norm(p_des)\niC = [a.GetIdx() for a in en.GetAtoms() if a.GetSymbol()=='C']\ncen = X[iC].mean(0); pc = cen-M; pc = pc-(pc@axis)*axis; pc/=np.linalg.norm(pc)\nang = np.arccos(np.clip(pc@p_des,-1,1)); sgn = np.sign(np.dot(axis,np.cross(pc,p_des)))\nX = (rot_axis_angle(axis,sgn*ang)@(X-M).T).T+M\ni_Nen1 = len(atoms)+idxNe[0]; i_Nen2 = len(atoms)+idxNe[1]\nfor s,c in zip([a.GetSymbol() for a in en.GetAtoms()], X): atoms.append((s,c))\n\n# pincer placement\nR,t = kabsch(Ppin, T)\nY2 = (R@Yk.T).T+t\ni_O1 = len(atoms)+mold[iO_A]; i_Nazo = len(atoms)+mold[iN_co]; i_O2 = len(atoms)+mold[iO_B]\nfor s,c in zip(symk, Y2): atoms.append((s,c))\n\nwith open('init.xyz','w') as f:\n    f.write(f\"{len(atoms)}\\ninitial Sn complex\\n\")\n    for s,c in atoms: f.write(f\"{s} {c[0]:.6f} {c[1]:.6f} {c[2]:.6f}\\n\")\nXall = np.array([c for _,c in atoms]); els=[s for s,_ in atoms]\nd = lambda a,b: np.linalg.norm(Xall[a]-Xall[b])\nprint(\"Sn-O1\",round(d(0,i_O1),2),\"Sn-Nazo\",round(d(0,i_Nazo),2),\"Sn-O2\",round(d(0,i_O2),2),\n      \"Sn-Nen1\",round(d(0,i_Nen1),2),\"Sn-Nen2\",round(d(0,i_Nen2),2),\"Sn-C1\",round(d(0,i_Cph1),2),\"Sn-C2\",round(d(0,i_Cph2),2))\nimport itertools\ncov = {'H':0.31,'C':0.76,'N':0.71,'O':0.66,'Br':1.20,'Sn':1.39}\nbad=[(round(np.linalg.norm(Xall[i]-Xall[j]),2),els[i],i,els[j],j) for i,j in itertools.combinations(range(len(Xall)),2)\n     if np.linalg.norm(Xall[i]-Xall[j]) < 0.78*(cov[els[i]]+cov[els[j]])]\nprint(\"clashes:\", bad)\nprint(\"idx:\", i_Cph1,i_Cph2,i_Nen1,i_Nen2,i_O1,i_Nazo,i_O2)\nEOF\npython3 build2.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 6366,
+   "output_tokens": 4067,
+   "total_tokens": 10433,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 5760
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 1540
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "pincer chords O1-N, N-O2, O1-O2: 2.776 3.805 5.544\nsolved radii: [2.09939867 2.57772469 3.70660031]\nen N-N chord: 2.833\nen span deg: 76.04\nen angles: 303.98 380.02\nSn-O1 2.1 Sn-Nazo 2.58 Sn-O2 3.71 Sn-Nen1 2.3 Sn-Nen2 2.3 Sn-C1 2.15 Sn-C2 2.15\nclashes: [(np.float64(1.31), 'Sn', 0, 'H', 28), (np.float64(0.82), 'H', 18, 'C', 52)]\nidx: 1 12 23 26 35 38 47\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_7d790d70db714867971035da"
+ },
+ {
+  "type": "AIMessage",
+  "content": "The free-embedded pincer conformation is too extended (the azo ligand needs to adopt a \"wrapped\" conformation, as shown in the 2D drawing). Use RDKit's 2D depiction coordinates (which capture the wrapped shape) as a planar pincer, and solve the equatorial layout consistently.\n\n",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > build3.py << 'EOF'\nimport numpy as np\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem, rdCoordGen\nfrom scipy.optimize import fsolve\n\ndef coords(m):\n    c = m.GetConformer()\n    return np.array([[c.GetAtomPosition(i).x, c.GetAtomPosition(i).y, c.GetAtomPosition(i).z]\n                     for i in range(m.GetNumAtoms())])\ndef kabsch(P, Q):\n    Pc=P.mean(0); Qc=Q.mean(0); H=(P-Pc).T@(Q-Qc)\n    U,S,Vt=np.linalg.svd(H); d=np.sign(np.linalg.det(Vt.T@U.T))\n    R=Vt.T@np.diag([1,1,d])@U.T; return R, Qc-R@Pc\ndef rot_axis_angle(axis, ang):\n    axis=axis/np.linalg.norm(axis)\n    K=np.array([[0,-axis[2],axis[1]],[axis[2],0,-axis[0]],[-axis[1],axis[0],0]])\n    return np.eye(3)+np.sin(ang)*K+(1-np.cos(ang))*(K@K)\ndef align_vec(v1,v2):\n    v1=v1/np.linalg.norm(v1); v2=v2/np.linalg.norm(v2)\n    ax=np.cross(v1,v2); ang=np.arccos(np.clip(np.dot(v1,v2),-1,1))\n    if np.linalg.norm(ax)<1e-8: return np.eye(3)\n    return rot_axis_angle(ax,ang)\ndef u(deg):\n    r=np.radians(deg); return np.array([np.cos(r),np.sin(r),0.0])\n\n# ---------- pincer: planar 2D coords ----------\npin = Chem.MolFromSmiles('Oc1c(/N=N/c2ccc(Br)cc2O)cc(Br)cc1')\npin = Chem.AddHs(pin)\nrdCoordGen.AddCoordGenCoords(pin)\nY = coords(pin); sym=[a.GetSymbol() for a in pin.GetAtoms()]\ndef nbrs(m,i): return [b.GetOtherAtomIdx(i) for b in m.GetAtomWithIdx(i).GetBonds()]\nidxO=[i for i,s in enumerate(sym) if s=='O']; idxN=[i for i,s in enumerate(sym) if s=='N']\niO_A,iO_B = idxO[0], idxO[-1]\ncA = nbrs(pin,iO_A)[0]\nringA=set()\nfor ring in pin.GetRingInfo().AtomRings():\n    if cA in ring: ringA=set(ring)\niN_co=[i for i in idxN if set(nbrs(pin,i))&ringA][0]\nkeep=[i for i in range(len(sym)) if not (sym[i]=='H' and nbrs(pin,i)[0] in (iO_A,iO_B))]\nYk=Y[keep][:,:2]; symk=[sym[i] for i in keep]\nmold={o:n for n,o in enumerate(keep)}\nP2d=Yk[[mold[iO_A],mold[iN_co],mold[iO_B]]]\nc12=np.linalg.norm(P2d[0]-P2d[1]); c23=np.linalg.norm(P2d[1]-P2d[2]); c13=np.linalg.norm(P2d[0]-P2d[2])\nprint(\"2D chords:\",round(c12,3),round(c23,3),round(c13,3))\n\n# ---------- solve equatorial layout ----------\ndef eqs(v):\n    r1,r2,r3,aN,aO2 = v\n    u1=u(90.); u2=u(aN); u3=u(aO2)\n    return [np.linalg.norm(r1*u1-r2*u2)-c12,\n            np.linalg.norm(r2*u2-r3*u3)-c23,\n            np.linalg.norm(r1*u1-r3*u3)-c13,\n            (aN-90.)-(aO2-aN),\n            r1-r3]\nsol,info,ier,msg = fsolve(eqs,[2.0,2.2,2.0,168.,246.],full_output=True)\nassert ier==1,msg\nr1,r2,r3,aN,aO2 = sol\nprint(\"layout r:\",round(r1,2),round(r2,2),round(r3,2),\" angles:\",90.,round(aN,1),round(aO2,1))\nT=np.array([r1*u(90.), r2*u(aN), r3*u(aO2)])\n\n# ---------- en ----------\nen = Chem.MolFromSmiles('NCCN'); en=Chem.AddHs(en)\nAllChem.EmbedMolecule(en,randomSeed=7); AllChem.MMFFOptimizeMolecule(en)\nXe=coords(en); idxNe=[a.GetIdx() for a in en.GetAtoms() if a.GetSymbol()=='N']\ndNN=np.linalg.norm(Xe[idxNe[0]]-Xe[idxNe[1]])\nr_en=2.32; span=2*np.degrees(np.arcsin((dNN/2)/r_en))\ng=( (aO2+360.) - aO2 - span )/2  # placeholder\ngap=((90.+360.)-aO2-span)/2\naN1=aO2+gap; aN2=aN1+span\nprint(\"en span\",round(span,1),\"angles\",round(aN1,1),round(aN2,1),\"gap\",round(gap,1))\ntN1,tN2 = r_en*u(aN1), r_en*u(aN2)\n\n# ---------- assemble ----------\natoms=[('Sn',np.zeros(3))]\ndef phenyl(ipso,axis,normal):\n    a=axis/np.linalg.norm(axis); n=normal/np.linalg.norm(normal)\n    n=n-(n@a)*a; n/=np.linalg.norm(n); w=np.cross(n,a)\n    center=ipso+1.39*a; e1=-a; ring=[]\n    for k in range(6): ring.append(center+1.39*(np.cos(np.radians(60*k))*e1+np.sin(np.radians(60*k))*w))\n    out=[('C',c) for c in ring]\n    for k in range(1,6):\n        dd=(ring[k]-center)/np.linalg.norm(ring[k]-center); out.append(('H',ring[k]+1.09*dd))\n    return out\ntC1=np.array([0,0,2.15]); tC2=np.array([0,0,-2.15])\ni_Cph1=len(atoms); atoms+=phenyl(tC1,tC1,np.array([0,1,0.0]))\ni_Cph2=len(atoms); atoms+=phenyl(tC2,tC2,np.array([1,0,0.0]))\n\nX=Xe.copy(); P=X[idxNe]; Q=np.array([tN1,tN2])\nR=align_vec(P[1]-P[0],Q[1]-Q[0]); X=(R@X.T).T; X+=Q[0]-X[idxNe[0]]\naxis=(Q[1]-Q[0]); axis/=np.linalg.norm(axis); M=(Q[0]+Q[1])/2\nmvec=M; p_des=mvec-(mvec@axis)*axis; p_des/=np.linalg.norm(p_des)\niC=[a.GetIdx() for a in en.GetAtoms() if a.GetSymbol()=='C']\ncen=X[iC].mean(0); pc=cen-M; pc=pc-(pc@axis)*axis; pc/=np.linalg.norm(pc)\nang=np.arccos(np.clip(pc@p_des,-1,1)); sgn=np.sign(np.dot(axis,np.cross(pc,p_des)))\nX=(rot_axis_angle(axis,sgn*ang)@(X-M).T).T+M\ni_Nen1=len(atoms)+idxNe[0]; i_Nen2=len(atoms)+idxNe[1]\nfor s,c in zip([a.GetSymbol() for a in en.GetAtoms()],X): atoms.append((s,c))\n\n# pincer planar -> 3D\nP3=np.column_stack([P2d,np.zeros(3)])\nR,t=kabsch(P3,T)\nY3=(R@Yk.T).T+t\ni_O1=len(atoms)+mold[iO_A]; i_Nazo=len(atoms)+mold[iN_co]; i_O2=len(atoms)+mold[iO_B]\nfor s,c in zip(symk,Y3): atoms.append((s,c))\n\nwith open('init.xyz','w') as f:\n    f.write(f\"{len(atoms)}\\ninitial Sn complex\\n\")\n    for s,c in atoms: f.write(f\"{s} {c[0]:.6f} {c[1]:.6f} {c[2]:.6f}\\n\")\nXall=np.array([c for _,c in atoms]); els=[s for s,_ in atoms]\nd=lambda a,b: np.linalg.norm(Xall[a]-Xall[b])\nprint(\"Sn-O1\",round(d(0,i_O1),2),\"Sn-Nazo\",round(d(0,i_Nazo),2),\"Sn-O2\",round(d(0,i_O2),2),\n      \"Sn-Nen1\",round(d(0,i_Nen1),2),\"Sn-Nen2\",round(d(0,i_Nen2),2),\"Sn-C1\",round(d(0,i_Cph1),2),\"Sn-C2\",round(d(0,i_Cph2),2))\nimport itertools\ncov={'H':0.31,'C':0.76,'N':0.71,'O':0.66,'Br':1.20,'Sn':1.39}\nbad=[(round(float(np.linalg.norm(Xall[i]-Xall[j])),2),els[i],i,els[j],j) for i,j in itertools.combinations(range(len(Xall)),2)\n     if np.linalg.norm(Xall[i]-Xall[j])<0.80*(cov[els[i]]+cov[els[j]])]\nprint(\"clashes:\",bad)\nprint(\"IDX\",i_Cph1,i_Cph2,i_Nen1,i_Nen2,i_O1,i_Nazo,i_O2)\nEOF\npython3 build3.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 9154,
+   "output_tokens": 10429,
+   "total_tokens": 19583,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 6144
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 7974
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "Traceback (most recent call last):\n  File \"/h/400/skaxu/elagenteworkdir/mol_0149_8314f5f8_qwen3.8-max/build3.py\", line 29, in <module>\n    rdCoordGen.AddCoordGenCoords(pin)\n    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAttributeError: module 'rdkit.Chem.rdCoordGen' has no attribute 'AddCoordGenCoords'\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_dea687c0c68d4d7bad3b6048"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python3 -c \"from rdkit.Chem import rdCoordGen; print([x for x in dir(rdCoordGen) if not x.startswith('_')])\""
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 11727,
+   "output_tokens": 108,
+   "total_tokens": 11835,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 8192
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 44
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "['AddCoords', 'CoordGenParams', 'SetDefaultTemplateFileDir']\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_0250f2af4b3249d69b908a3a"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "sed -i 's/rdCoordGen.AddCoordGenCoords(pin)/rdCoordGen.AddCoords(pin)/' build3.py && python3 build3.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 11821,
+   "output_tokens": 74,
+   "total_tokens": 11895,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 11520
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 14
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "2D chords: 2.0 3.0 5.0\nTraceback (most recent call last):\n  File \"/h/400/skaxu/elagenteworkdir/mol_0149_8314f5f8_qwen3.8-max/build3.py\", line 56, in <module>\n    assert ier==1,msg\n           ^^^^^^\nAssertionError: The iteration is not making good progress, as measured by the \n improvement from the last ten iterations.\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_94934236ee5b45778fe0849b"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python3 - << 'EOF'\nfrom rdkit import Chem\nfrom rdkit.Chem import rdCoordGen\nimport numpy as np\npin = Chem.MolFromSmiles('Oc1c(/N=N/c2ccc(Br)cc2O)cc(Br)cc1')\npin2 = Chem.Mol(pin)\nrdCoordGen.AddCoords(pin2)\nc = pin2.GetConformer()\nfor i,a in enumerate(pin2.GetAtoms()):\n    p=c.GetAtomPosition(i)\n    print(i, a.GetSymbol(), round(p.x,3), round(p.y,3))\nEOF"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 12009,
+   "output_tokens": 635,
+   "total_tokens": 12644,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 11520
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 473
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "0 O -0.531 -1.694\n1 C -1.396 -1.193\n2 C -1.395 -0.193\n3 N -0.529 0.306\n4 N 0.337 -0.195\n5 C 1.203 0.305\n6 C 1.204 1.305\n7 C 2.07 1.804\n8 C 2.936 1.303\n9 Br 3.802 1.803\n10 C 2.935 0.303\n11 C 2.069 -0.196\n12 O 2.068 -1.196\n13 C -2.261 0.307\n14 C -3.127 -0.192\n15 Br -3.993 0.309\n16 C -3.128 -1.192\n17 C -2.263 -1.693\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_52a8116c80f249e2ad4b2363"
+ },
+ {
+  "type": "AIMessage",
+  "content": "The RDKit embedding produces a reasonable 2D structure. Now I'll build the molecule and verify.\n\n",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python3 - << 'EOF'\nfrom rdkit import Chem\nfrom rdkit.Chem import rdCoordGen\nimport numpy as np\npin = Chem.MolFromSmiles('Oc1c(/N=N/c2ccc(Br)cc2O)cc(Br)cc1')\npin2 = Chem.Mol(pin)\nrdCoordGen.AddCoords(pin2)\nc = pin2.GetConformer()\nfor i,a in enumerate(pin2.GetAtoms()):\n    p=c.GetAtomPosition(i)\n    print(i, a.GetSymbol(), round(p.x,3), round(p.y,3))\nEOF"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 12461,
+   "output_tokens": 224,
+   "total_tokens": 12685,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 11520
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 40
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "0 O -0.531 -1.694\n1 C -1.396 -1.193\n2 C -1.395 -0.193\n3 N -0.529 0.306\n4 N 0.337 -0.195\n5 C 1.203 0.305\n6 C 1.204 1.305\n7 C 2.07 1.804\n8 C 2.936 1.303\n9 Br 3.802 1.803\n10 C 2.935 0.303\n11 C 2.069 -0.196\n12 O 2.068 -1.196\n13 C -2.261 0.307\n14 C -3.127 -0.192\n15 Br -3.993 0.309\n16 C -3.128 -1.192\n17 C -2.263 -1.693\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_1bbea7dcfa2c4a47aadb76a7"
+ },
+ {
+  "type": "AIMessage",
+  "content": "Odd \u2014 the printed chords (2.0, 3.0, 5.0) don't match these coordinates (O\u2013O should be ~2.65). Let me debug.\n\n",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python3 - << 'EOF'\nfrom rdkit import Chem\nfrom rdkit.Chem import rdCoordGen\nimport numpy as np\npin = Chem.MolFromSmiles('Oc1c(/N=N/c2ccc(Br)cc2O)cc(Br)cc1')\npin = Chem.AddHs(pin)\nrdCoordGen.AddCoords(pin)\nc = pin.GetConformer()\nY = np.array([[c.GetAtomPosition(i).x, c.GetAtomPosition(i).y, c.GetAtomPosition(i).z] for i in range(pin.GetNumAtoms())])\nsym=[a.GetSymbol() for a in pin.GetAtoms()]\nprint(len(sym), [ (i,s) for i,s in enumerate(sym) if s in 'ON'])\ndef nbrs(m,i): return [b.GetOtherAtomIdx(i) for b in m.GetAtomWithIdx(i).GetBonds()]\nidxO=[i for i,s in enumerate(sym) if s=='O']; idxN=[i for i,s in enumerate(sym) if s=='N']\niO_A,iO_B=idxO[0],idxO[-1]\ncA=nbrs(pin,iO_A)[0]\nringA=set()\nfor ring in pin.GetRingInfo().AtomRings():\n    if cA in ring: ringA=set(ring)\niN_co=[i for i in idxN if set(nbrs(pin,i))&ringA][0]\nkeep=[i for i in range(len(sym)) if not (sym[i]=='H' and nbrs(pin,i)[0] in (iO_A,iO_B))]\nmold={o:n for n,o in enumerate(keep)}\nYk=Y[keep][:,:2]\nP2d=Yk[[mold[iO_A],mold[iN_co],mold[iO_B]]]\nprint(P2d)\nprint(np.linalg.norm(P2d[0]-P2d[1]), np.linalg.norm(P2d[1]-P2d[2]), np.linalg.norm(P2d[0]-P2d[2]))\nEOF"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 12935,
+   "output_tokens": 2360,
+   "total_tokens": 15295,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 12288
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 1833
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "26 [(0, 'O'), (3, 'N'), (4, 'N'), (12, 'O')]\n[[-2.26393343  1.3009556 ]\n [-0.52993333  0.30455553]\n [ 2.07126667 -1.19024442]]\n1.9998923514480438 3.000111397253573 5.000003748339538\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_f813327ca6ad42538a29b348"
+ },
+ {
+  "type": "AIMessage",
+  "content": "The CoordGen coordinates are in unit-bond scale, and my ring-A SMILES had the wrong Br position (in the drawing, Br is **para** to the azo carbon and **meta** to O on both rings). Instead, I'll analytically construct the wrapped pincer in 2D with the correct bond lengths.\n\n",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > build4.py << 'EOF'\nimport numpy as np, itertools\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem\nfrom scipy.optimize import fsolve\n\ndef coords(m):\n    c=m.GetConformer()\n    return np.array([[c.GetAtomPosition(i).x,c.GetAtomPosition(i).y,c.GetAtomPosition(i).z] for i in range(m.GetNumAtoms())])\ndef kabsch(P,Q):\n    Pc=P.mean(0); Qc=Q.mean(0); H=(P-Pc).T@(Q-Qc)\n    U,S,Vt=np.linalg.svd(H); d=np.sign(np.linalg.det(Vt.T@U.T))\n    R=Vt.T@np.diag([1,1,d])@U.T; return R, Qc-R@Pc\ndef rot_ax(axis,ang):\n    axis=axis/np.linalg.norm(axis)\n    K=np.array([[0,-axis[2],axis[1]],[axis[2],0,-axis[0]],[-axis[1],axis[0],0]])\n    return np.eye(3)+np.sin(ang)*K+(1-np.cos(ang))*(K@K)\ndef align_vec(v1,v2):\n    v1=v1/np.linalg.norm(v1); v2=v2/np.linalg.norm(v2)\n    ax=np.cross(v1,v2); ang=np.arccos(np.clip(np.dot(v1,v2),-1,1))\n    if np.linalg.norm(ax)<1e-8: return np.eye(3)\n    return rot_ax(ax,ang)\ndef u(deg):\n    r=np.radians(deg); return np.array([np.cos(r),np.sin(r),0.0])\ndef rad(deg): return np.array([np.cos(np.radians(deg)),np.sin(np.radians(deg))])\n\n# ---------------- analytic wrapped pincer (2D) ----------------\ndef build_pincer(sN4, sC1p, sOp):\n    at=[]  # (symbol, xy)\n    CA=np.zeros(2); phi=[90,30,-30,-90,-150,150]\n    ringA=[CA+1.39*rad(p) for p in phi]\n    C1,C2,C3,C4,C5,C6 = ringA\n    O  = C1+1.36*rad(90)\n    N3 = C2+1.42*rad(30)\n    BrA= C5+1.90*rad(-150)\n    w=(C2-N3)/np.linalg.norm(C2-N3)\n    dN4=rot_ax(np.array([0,0,1.0]),sN4*np.radians(115.))[:2,:2]@w\n    N4=N3+1.25*dN4\n    w2=(N3-N4)/np.linalg.norm(N3-N4)\n    dC1=rot_ax(np.array([0,0,1.0]),sC1p*np.radians(115.))[:2,:2]@w2\n    C1p=N4+1.42*dC1\n    CB=C1p-1.39*dC1\n    psi1=np.degrees(np.arctan2((C1p-CB)[1],(C1p-CB)[0]))\n    ringB=[CB+1.39*rad(psi1+60*k) for k in range(6)]\n    # O' at neighbor k=1 or 5\n    kO = 1 if sOp>0 else 5\n    Op = ringB[kO]+1.36*rad(psi1+60*kO)\n    BrB= ringB[3]+1.90*rad(psi1+180)\n    at=[('C',c) for c in ringA]+[('O',O),('N',N3),('N',N4),('Br',BrA)]\n    at+=[('C',c) for c in ringB]+[('O',Op),('Br',BrB)]\n    Hs=[('H',ringA[i]+1.09*rad(phi[i])) for i in (2,3,5)]\n    Hs+=[('H',ringB[k]+1.09*rad(psi1+60*k)) for k in (1,2,4,5) if k!=kO]\n    at+=Hs\n    X=np.array([p for _,p in at]); syms=[s for s,_ in at]\n    iO=12; iN3=13; iOp=19+0  # recompute indices properly below\n    return at\n\n# indices: ringA C0-5, O6, N7, N8, Br9, ringB C10-15, O16, Br17, H...\ndef pincer_arrays(sN4,sC1p,sOp):\n    at=build_pincer(sN4,sC1p,sOp)\n    X=np.array([p for _,p in at]); syms=[s for s,_ in at]\n    return syms,X\n\nbest=None\nfor sN4,sC1p,sOp in itertools.product([1,-1],[1,-1],[1,-1]):\n    syms,X=pincer_arrays(sN4,sC1p,sOp)\n    iO=[i for i,s in enumerate(syms) if s=='O']\n    iN=[i for i,s in enumerate(syms) if s=='N']\n    O,XN,Op = X[iO[0]], X[iN[0]], X[iO[1]]\n    c13=np.linalg.norm(O-Op)\n    # clash check\n    ok=True\n    for i,j in itertools.combinations(range(len(X)),2):\n        dd=np.linalg.norm(X[i]-X[j])\n        if dd<1.7 and abs(i-j)>1:\n            ok=False; break\n    if not ok: continue\n    if best is None or c13<best[0]:\n        best=(c13,(sN4,sC1p,sOp))\nprint(\"best wrap:\",best)\nsN4,sC1p,sOp=best[1]\nsyms,X2d=pincer_arrays(sN4,sC1p,sOp)\niO=[i for i,s in enumerate(syms) if s=='O']; iN=[i for i,s in enumerate(syms) if s=='N']\nP2d=X2d[[iO[0],iN[0],iO[1]]]\nc12=np.linalg.norm(P2d[0]-P2d[1]); c23=np.linalg.norm(P2d[1]-P2d[2]); c13=np.linalg.norm(P2d[0]-P2d[2])\nprint(\"chords:\",round(c12,3),round(c23,3),round(c13,3))\n\ndef eqs(v):\n    r1,r2,r3,aN,aO2=v\n    u1=u(90.); u2=u(aN); u3=u(aO2)\n    return [np.linalg.norm(r1*u1-r2*u2)-c12,\n            np.linalg.norm(r2*u2-r3*u3)-c23,\n            np.linalg.norm(r1*u1-r3*u3)-c13,\n            (aN-90.)-(aO2-aN),\n            r1-r3]\nsol,info,ier,msg=fsolve(eqs,[2.0,2.2,2.0,165.,240.],full_output=True)\nprint(\"ier\",ier,msg)\nr1,r2,r3,aN,aO2=sol\nprint(\"layout:\",round(r1,2),round(r2,2),round(r3,2),90.,round(aN,1),round(aO2,1))\nT=np.array([r1*u(90.),r2*u(aN),r3*u(aO2)])\n\n# ---------------- en ----------------\nen=Chem.MolFromSmiles('NCCN'); en=Chem.AddHs(en)\nAllChem.EmbedMolecule(en,randomSeed=7); AllChem.MMFFOptimizeMolecule(en)\nXe=coords(en); idxNe=[a.GetIdx() for a in en.GetAtoms() if a.GetSymbol()=='N']\ndNN=np.linalg.norm(Xe[idxNe[0]]-Xe[idxNe[1]])\nr_en=2.32; span=2*np.degrees(np.arcsin((dNN/2)/r_en))\ngap=((90.+360.)-aO2-span)/2\naN1=aO2+gap; aN2=aN1+span\nprint(\"en span\",round(span,1),\"angles\",round(aN1,1),round(aN2,1))\ntN1,tN2=r_en*u(aN1),r_en*u(aN2)\n\natoms=[('Sn',np.zeros(3))]\ndef phenyl(ipso,axis,normal):\n    a=axis/np.linalg.norm(axis); n=normal/np.linalg.norm(normal)\n    n=n-(n@a)*a; n/=np.linalg.norm(n); w=np.cross(n,a)\n    center=ipso+1.39*a; e1=-a; ring=[]\n    for k in range(6): ring.append(center+1.39*(np.cos(np.radians(60*k))*e1+np.sin(np.radians(60*k))*w))\n    out=[('C',c) for c in ring]\n    for k in range(1,6):\n        dd=(ring[k]-center)/np.linalg.norm(ring[k]-center); out.append(('H',ring[k]+1.09*dd))\n    return out\ntC1=np.array([0,0,2.15]); tC2=np.array([0,0,-2.15])\ni_Cph1=len(atoms); atoms+=phenyl(tC1,tC1,np.array([0,1,0.0]))\ni_Cph2=len(atoms); atoms+=phenyl(tC2,tC2,np.array([1,0,0.0]))\n\nX=Xe.copy(); P=X[idxNe]; Q=np.array([tN1,tN2])\nR=align_vec(P[1]-P[0],Q[1]-Q[0]); X=(R@X.T).T; X+=Q[0]-X[idxNe[0]]\naxis=(Q[1]-Q[0]); axis/=np.linalg.norm(axis); M=(Q[0]+Q[1])/2\np_des=M-(M@axis)*axis; p_des/=np.linalg.norm(p_des)\niC=[a.GetIdx() for a in en.GetAtoms() if a.GetSymbol()=='C']\ncen=X[iC].mean(0); pc=cen-M; pc=pc-(pc@axis)*axis; pc/=np.linalg.norm(pc)\nang=np.arccos(np.clip(pc@p_des,-1,1)); sgn=np.sign(np.dot(axis,np.cross(pc,p_des)))\nX=(rot_ax(axis,sgn*ang)@(X-M).T).T+M\ni_Nen1=len(atoms)+idxNe[0]; i_Nen2=len(atoms)+idxNe[1]\nfor s,c in zip([a.GetSymbol() for a in en.GetAtoms()],X): atoms.append((s,c))\n\nP3=np.column_stack([P2d,np.zeros(3)])\nR,t=kabsch(P3,T)\nY3=(R@X2d.T).T+t\ni_O1=len(atoms)+iO[0]; i_Nazo=len(atoms)+iN[0]; i_O2=len(atoms)+iO[1]\nfor s,c in zip(syms,Y3): atoms.append((s,c))\n\nwith open('init.xyz','w') as f:\n    f.write(f\"{len(atoms)}\\ninitial Sn complex\\n\")\n    for s,c in atoms: f.write(f\"{s} {c[0]:.6f} {c[1]:.6f} {c[2]:.6f}\\n\")\nXall=np.array([c for _,c in atoms]); els=[s for s,_ in atoms]\nd=lambda a,b: float(np.linalg.norm(Xall[a]-Xall[b]))\nprint(\"Sn-O1\",round(d(0,i_O1),2),\"Sn-Nazo\",round(d(0,i_Nazo),2),\"Sn-O2\",round(d(0,i_O2),2),\n      \"Sn-Nen1\",round(d(0,i_Nen1),2),\"Sn-Nen2\",round(d(0,i_Nen2),2),\"Sn-C1\",round(d(0,i_Cph1),2),\"Sn-C2\",round(d(0,i_Cph2),2))\ncov={'H':0.31,'C':0.76,'N':0.71,'O':0.66,'Br':1.20,'Sn':1.39}\nbad=[(round(d(i,j),2),els[i],i,els[j],j) for i,j in itertools.combinations(range(len(Xall)),2)\n     if d(i,j)<0.80*(cov[els[i]]+cov[els[j]])]\nprint(\"clashes:\",bad)\nprint(\"IDX\",i_Cph1,i_Cph2,i_Nen1,i_Nen2,i_O1,i_Nazo,i_O2)\nEOF\npython3 build4.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 13634,
+   "output_tokens": 9779,
+   "total_tokens": 23413,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 12672
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 6640
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "best wrap: None\nTraceback (most recent call last):\n  File \"/h/400/skaxu/elagenteworkdir/mol_0149_8314f5f8_qwen3.8-max/build4.py\", line 80, in <module>\n    sN4,sC1p,sOp=best[1]\n                 ~~~~^^^\nTypeError: 'NoneType' object is not subscriptable\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_52bf1f7a6b1d4161aad3e703"
+ },
+ {
+  "type": "AIMessage",
+  "content": "My clash check wrongly flagged ring-closure bonds. Let me use an explicit bond list.\n\n",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > pincer2d.py << 'EOF'\nimport numpy as np, itertools\ndef rad(deg): return np.array([np.cos(np.radians(deg)),np.sin(np.radians(deg))])\ndef rot2(ang):\n    r=np.radians(ang); return np.array([[np.cos(r),-np.sin(r)],[np.sin(r),np.cos(r)]])\n\ndef build_pincer(sN4, sC1p, sOp):\n    at=[]; bonds=[]\n    phi=[90,30,-30,-90,-150,150]\n    ringA=[1.39*rad(p) for p in phi]\n    C1,C2,C3,C4,C5,C6=ringA\n    O  = C1+1.36*rad(90)\n    N3 = C2+1.42*rad(30)\n    BrA= C5+1.90*rad(-150)\n    w=(C2-N3)/np.linalg.norm(C2-N3)\n    N4=N3+1.25*(rot2(sN4*115.)@w)\n    w2=(N3-N4)/np.linalg.norm(N3-N4)\n    C1p=N4+1.42*(rot2(sC1p*115.)@w2)\n    CB=C1p-1.39*((C1p-N4)/np.linalg.norm(C1p-N4))\n    psi1=np.degrees(np.arctan2((C1p-CB)[1],(C1p-CB)[0]))\n    ringB=[CB+1.39*rad(psi1+60*k) for k in range(6)]\n    kO = 1 if sOp>0 else 5\n    Op = ringB[kO]+1.36*rad(psi1+60*kO)\n    BrB= ringB[3]+1.90*rad(psi1+180)\n    # atoms: 0-5 ringA, 6 O, 7 N3, 8 N4, 9 BrA, 10-15 ringB, 16 Op, 17 BrB\n    pos = ringA+[O,N3,N4,BrA]+ringB+[Op,BrB]\n    syms= ['C']*6+['O','N','N','Br']+['C']*6+['O','Br']\n    bonds = [(0,1),(1,2),(2,3),(3,4),(4,5),(5,0),(0,6),(1,7),(7,8),(4,9),(8,10),\n             (10,11),(11,12),(12,13),(13,14),(14,15),(15,10),(10+kO,16),(13,17)]\n    # H atoms\n    hA=[2,3,5]\n    hB=[k for k in (1,2,4,5) if k!=kO]\n    for k in hA:\n        pos.append(ringA[k]+1.09*rad(phi[k])); syms.append('H'); bonds.append((k,len(pos)-1))\n    for k in hB:\n        pos.append(ringB[k]+1.09*rad(psi1+60*k)); syms.append('H'); bonds.append((10+k,len(pos)-1))\n    return syms, np.array(pos), bonds, dict(iO1=6,iN3=7,iN4=8,iO2=16)\n\nif __name__=='__main__':\n    best=None\n    for sN4,sC1p,sOp in itertools.product([1,-1],[1,-1],[1,-1]):\n        syms,X,bonds,ix=build_pincer(sN4,sC1p,sOp)\n        bs=set(tuple(sorted(b)) for b in bonds)\n        ok=True\n        for i,j in itertools.combinations(range(len(X)),2):\n            dd=np.linalg.norm(X[i]-X[j])\n            if (i,j) in bs: continue\n            lim = 1.6 if ('H' in (syms[i],syms[j])) else 2.2\n            if dd<lim: ok=False; break\n        if not ok: continue\n        c13=np.linalg.norm(X[ix['iO1']]-X[ix['iO2']])\n        if best is None or c13<best[0]: best=(c13,(sN4,sC1p,sOp))\n    print(\"best:\",best)\n    if best:\n        syms,X,bonds,ix=build_pincer(*best[1])\n        P=X[[ix['iO1'],ix['iN3'],ix['iO2']]]\n        print(\"chords:\",[round(float(np.linalg.norm(P[a]-P[b])),3) for a,b in [(0,1),(1,2),(0,2)]])\nEOF\npython3 pincer2d.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 16877,
+   "output_tokens": 1520,
+   "total_tokens": 18397,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 13312
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 328
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "best: None\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_3ef9ebb547ac4e04a6e8cb9d"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python3 - << 'EOF'\nimport itertools, numpy as np\nfrom pincer2d import build_pincer\nfor sN4,sC1p,sOp in itertools.product([1,-1],[1,-1],[1,-1]):\n    syms,X,bonds,ix=build_pincer(sN4,sC1p,sOp)\n    bs=set(tuple(sorted(b)) for b in bonds)\n    worst=(99,None)\n    for i,j in itertools.combinations(range(len(X)),2):\n        if (i,j) in bs: continue\n        dd=float(np.linalg.norm(X[i]-X[j]))\n        lim = 1.6 if ('H' in (syms[i],syms[j])) else 2.2\n        if dd-lim < worst[0]: worst=(dd-lim,(syms[i],i,syms[j],j,round(dd,2)))\n    P=X[[ix['iO1'],ix['iN3'],ix['iO2']]]\n    c13=float(np.linalg.norm(P[0]-P[2]))\n    print(sN4,sC1p,sOp,\"O..O\",round(c13,2),\"worst\",worst)\nEOF"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 18086,
+   "output_tokens": 321,
+   "total_tokens": 18407,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 16384
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 25
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "1 1 1 O..O 6.77 worst (-2.0459876830843173, ('N', 7, 'C', 14, 0.15))\n1 1 -1 O..O 3.15 worst (-2.0459876830843173, ('N', 7, 'C', 14, 0.15))\n1 -1 1 O..O 3.55 worst (-2.045987683084317, ('N', 7, 'C', 12, 0.15))\n1 -1 -1 O..O 6.79 worst (-2.045987683084317, ('N', 7, 'C', 12, 0.15))\n-1 1 1 O..O 3.55 worst (-2.0459876830843178, ('N', 7, 'C', 14, 0.15))\n-1 1 -1 O..O 4.95 worst (-2.0459876830843178, ('N', 7, 'C', 14, 0.15))\n-1 -1 1 O..O 1.87 worst (-2.045987683084318, ('N', 7, 'C', 12, 0.15))\n-1 -1 -1 O..O 3.19 worst (-2.045987683084318, ('N', 7, 'C', 12, 0.15))\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_a50b7510a927493197f484f9"
+ },
+ {
+  "type": "AIMessage",
+  "content": "Found the bug: ring B center should be on the far side of C1' from N4. Fixing:\n\n",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python3 - << 'EOF' > /dev/null 2>&1\nEOF\nsed -i \"s|CB=C1p-1.39\\*((C1p-N4)/np.linalg.norm(C1p-N4))|dC1=(C1p-N4)/np.linalg.norm(C1p-N4); CB=C1p+1.39*dC1|\" pincer2d.py\nsed -i \"s|psi1=np.degrees(np.arctan2((C1p-CB)\\[1\\],(C1p-CB)\\[0\\]))|psi1=np.degrees(np.arctan2(-dC1[1],-dC1[0]))|\" pincer2d.py\npython3 pincer2d.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 18827,
+   "output_tokens": 688,
+   "total_tokens": 19515,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 17408
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 468
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "best: (np.float64(3.582134283913643), (1, -1, -1))\nchords: [2.78, 2.327, 3.582]\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_5461ce1763234467b183885e"
+ },
+ {
+  "type": "AIMessage",
+  "content": "Wrapped pincer found (O\u00b7\u00b7\u00b7O 3.58 \u00c5). Now assembling the full complex with consistent equatorial layout:\n\n",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > build5.py << 'EOF'\nimport numpy as np, itertools\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem\nfrom pincer2d import build_pincer\n\ndef coords(m):\n    c=m.GetConformer()\n    return np.array([[c.GetAtomPosition(i).x,c.GetAtomPosition(i).y,c.GetAtomPosition(i).z] for i in range(m.GetNumAtoms())])\ndef kabsch(P,Q):\n    Pc=P.mean(0); Qc=Q.mean(0); H=(P-Pc).T@(Q-Qc)\n    U,S,Vt=np.linalg.svd(H); d=np.sign(np.linalg.det(Vt.T@U.T))\n    R=Vt.T@np.diag([1,1,d])@U.T; return R, Qc-R@Pc\ndef rot_ax(axis,ang):\n    axis=axis/np.linalg.norm(axis)\n    K=np.array([[0,-axis[2],axis[1]],[axis[2],0,-axis[0]],[-axis[1],axis[0],0]])\n    return np.eye(3)+np.sin(ang)*K+(1-np.cos(ang))*(K@K)\ndef align_vec(v1,v2):\n    v1=v1/np.linalg.norm(v1); v2=v2/np.linalg.norm(v2)\n    ax=np.cross(v1,v2); ang=np.arccos(np.clip(np.dot(v1,v2),-1,1))\n    if np.linalg.norm(ax)<1e-8: return np.eye(3)\n    return rot_ax(ax,ang)\ndef u(deg):\n    r=np.radians(deg); return np.array([np.cos(r),np.sin(r),0.0])\n\nsyms,X2d,bonds,ix = build_pincer(1,-1,-1)\nP2d = X2d[[ix['iO1'],ix['iN3'],ix['iO2']]]\nc12=float(np.linalg.norm(P2d[0]-P2d[1])); c23=float(np.linalg.norm(P2d[1]-P2d[2])); c13=float(np.linalg.norm(P2d[0]-P2d[2]))\nr1,r2,r3 = 1.95,2.30,1.95\na12=np.degrees(np.arccos((r1**2+r2**2-c12**2)/(2*r1*r2)))\na23=np.degrees(np.arccos((r2**2+r3**2-c23**2)/(2*r2*r3)))\naO1=90.; aN=aO1+a12; aO2=aN+a23\nprint(\"angles:\",round(aO1,1),round(aN,1),round(aO2,1))\nT=np.array([r1*u(aO1),r2*u(aN),r3*u(aO2)])\n\nen=Chem.MolFromSmiles('NCCN'); en=Chem.AddHs(en)\nAllChem.EmbedMolecule(en,randomSeed=7); AllChem.MMFFOptimizeMolecule(en)\nXe=coords(en); idxNe=[a.GetIdx() for a in en.GetAtoms() if a.GetSymbol()=='N']\ndNN=float(np.linalg.norm(Xe[idxNe[0]]-Xe[idxNe[1]]))\nr_en=2.32; span=2*np.degrees(np.arcsin((dNN/2)/r_en))\ngap=((aO1+360.)-aO2-span)/2\naN1=aO2+gap; aN2=aN1+span\nprint(\"en span\",round(span,1),\"angles\",round(aN1,1),round(aN2,1))\ntN1,tN2=r_en*u(aN1),r_en*u(aN2)\n\natoms=[('Sn',np.zeros(3))]\ndef phenyl(ipso,axis,normal):\n    a=axis/np.linalg.norm(axis); n=normal/np.linalg.norm(normal)\n    n=n-(n@a)*a; n/=np.linalg.norm(n); w=np.cross(n,a)\n    center=ipso+1.39*a; e1=-a; ring=[]\n    for k in range(6): ring.append(center+1.39*(np.cos(np.radians(60*k))*e1+np.sin(np.radians(60*k))*w))\n    out=[('C',c) for c in ring]\n    for k in range(1,6):\n        dd=(ring[k]-center)/np.linalg.norm(ring[k]-center); out.append(('H',ring[k]+1.09*dd))\n    return out\ntC1=np.array([0,0,2.15]); tC2=np.array([0,0,-2.15])\ni_Cph1=len(atoms); atoms+=phenyl(tC1,tC1,np.array([0,1,0.0]))\ni_Cph2=len(atoms); atoms+=phenyl(tC2,tC2,np.array([1,0,0.0]))\n\nX=Xe.copy(); P=X[idxNe]; Q=np.array([tN1,tN2])\nR=align_vec(P[1]-P[0],Q[1]-Q[0]); X=(R@X.T).T; X+=Q[0]-X[idxNe[0]]\naxis=(Q[1]-Q[0]); axis/=np.linalg.norm(axis); M=(Q[0]+Q[1])/2\np_des=M-(M@axis)*axis; p_des/=np.linalg.norm(p_des)\niC=[a.GetIdx() for a in en.GetAtoms() if a.GetSymbol()=='C']\ncen=X[iC].mean(0); pc=cen-M; pc=pc-(pc@axis)*axis; pc/=np.linalg.norm(pc)\nang=np.arccos(np.clip(pc@p_des,-1,1)); sgn=np.sign(np.dot(axis,np.cross(pc,p_des)))\nX=(rot_ax(axis,sgn*ang)@(X-M).T).T+M\ni_Nen1=len(atoms)+idxNe[0]; i_Nen2=len(atoms)+idxNe[1]\nfor s,c in zip([a.GetSymbol() for a in en.GetAtoms()],X): atoms.append((s,c))\n\nP3=np.column_stack([P2d,np.zeros(3)])\nR,t=kabsch(P3,T)\nY3=(R@X2d.T).T+t\ni_O1=len(atoms)+ix['iO1']; i_Nazo=len(atoms)+ix['iN3']; i_O2=len(atoms)+ix['iO2']\nfor s,c in zip(syms,Y3): atoms.append((s,c))\n\nwith open('init.xyz','w') as f:\n    f.write(f\"{len(atoms)}\\ninitial Sn complex\\n\")\n    for s,c in atoms: f.write(f\"{s} {c[0]:.6f} {c[1]:.6f} {c[2]:.6f}\\n\")\nXall=np.array([c for _,c in atoms]); els=[s for s,_ in atoms]\nd=lambda a,b: float(np.linalg.norm(Xall[a]-Xall[b]))\nprint(\"Sn-O1\",round(d(0,i_O1),2),\"Sn-Nazo\",round(d(0,i_Nazo),2),\"Sn-O2\",round(d(0,i_O2),2),\n      \"Sn-Nen1\",round(d(0,i_Nen1),2),\"Sn-Nen2\",round(d(0,i_Nen2),2),\"Sn-C1\",round(d(0,i_Cph1),2),\"Sn-C2\",round(d(0,i_Cph2),2))\ncov={'H':0.31,'C':0.76,'N':0.71,'O':0.66,'Br':1.20,'Sn':1.39}\nbad=[(round(d(i,j),2),els[i],i,els[j],j) for i,j in itertools.combinations(range(len(Xall)),2)\n     if d(i,j)<0.80*(cov[els[i]]+cov[els[j]])]\nprint(\"clashes:\",bad)\nprint(\"IDX\",i_Cph1,i_Cph2,i_Nen1,i_Nen2,i_O1,i_Nazo,i_O2)\nEOF\npython3 build5.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 19120,
+   "output_tokens": 3734,
+   "total_tokens": 22854,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 18432
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 1801
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "angles: 90.0 171.3 237.1\nen span 108.8 angles 289.1 397.9\nTraceback (most recent call last):\n  File \"/h/400/skaxu/elagenteworkdir/mol_0149_8314f5f8_qwen3.8-max/build5.py\", line 72, in <module>\n    Y3=(R@X2d.T).T+t\n        ~^~~~~~\nValueError: matmul: Input operand 1 has a mismatch in its core dimension 0, with gufunc signature (n?,k),(k,m?)->(n?,m?) (size 2 is different from 3)\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_b7e9edecf80d4dc99ada8c81"
+ },
+ {
+  "type": "AIMessage",
+  "content": "Two fixes: pad 2D\u21923D, and build the chelating en analytically (the embedded en was in an extended anti conformation).\n\n",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > build6.py << 'EOF'\nimport numpy as np, itertools\nfrom pincer2d import build_pincer\n\ndef rot_ax(axis,ang):\n    axis=axis/np.linalg.norm(axis)\n    K=np.array([[0,-axis[2],axis[1]],[axis[2],0,-axis[0]],[-axis[1],axis[0],0]])\n    return np.eye(3)+np.sin(ang)*K+(1-np.cos(ang))*(K@K)\ndef u(deg):\n    r=np.radians(deg); return np.array([np.cos(r),np.sin(r),0.0])\n\nsyms,X2,bonds,ix = build_pincer(1,-1,-1)\nX2d=np.column_stack([X2,np.zeros(len(X2))])\nP2d = X2d[[ix['iO1'],ix['iN3'],ix['iO2']]]\nc12=float(np.linalg.norm(P2d[0]-P2d[1])); c23=float(np.linalg.norm(P2d[1]-P2d[2])); c13=float(np.linalg.norm(P2d[0]-P2d[2]))\nr1,r2,r3 = 1.95,2.30,1.95\na12=np.degrees(np.arccos((r1**2+r2**2-c12**2)/(2*r1*r2)))\na23=np.degrees(np.arccos((r2**2+r3**2-c23**2)/(2*r2*r3)))\naO1=90.; aN=aO1+a12; aO2=aN+a23\nprint(\"pincer angles:\",round(aO1,1),round(aN,1),round(aO2,1))\nT=np.array([r1*u(aO1),r2*u(aN),r3*u(aO2)])\n\n# ---------- analytic chelating en ----------\ndNN=2.90; r_en=2.32\nspan=2*np.degrees(np.arcsin((dNN/2)/r_en))\ngap=((aO1+360.)-aO2-span)/2\naN1=aO2+gap; aN2=aN1+span\nprint(\"en span\",round(span,1),\"angles\",round(aN1,1),round(aN2,1),\"gap\",round(gap,1))\nN1=r_en*u(aN1); N2=r_en*u(aN2)\nSn=np.zeros(3)\n# solve C1,C2 in equatorial plane, mirror-symmetric\naxc=(N2-N1)/np.linalg.norm(N2-N1); M=(N1+N2)/2\npv=M/np.linalg.norm(M)  # outward in-plane\n# local coords: x along axc, y along pv ; N1=(-h,0), N2=(h,0)\nh=dNN/2\n# C1=(x1,y1), C2=(-x1,y1) mirror: |C1-N1|^2=(x1+h)^2+y1^2=1.46^2 ; |C1-C2|^2=(2x1)^2=1.52^2 -> x1=-0.76? C1 near N1: x1=-0.76\nx1=-0.76\ny1=np.sqrt(1.46**2-(x1+h)**2)\nC1=M+x1*axc+y1*pv; C2=M-x1*axc+y1*pv\nprint(\"check en bonds:\",round(float(np.linalg.norm(C1-N1)),3),round(float(np.linalg.norm(C2-N2)),3),round(float(np.linalg.norm(C1-C2)),3))\ndef nh2(N,b1to,b2to):\n    b1=(b1to-N)/np.linalg.norm(b1to-N); b2=(b2to-N)/np.linalg.norm(b2to-N)\n    m=-(b1+b2); m/=np.linalg.norm(m); p=np.cross(b1,b2); p/=np.linalg.norm(p)\n    cb=b1@m; # need h.b1=-1/3 with h=cos(a)m+sin(a)p -> cos(a)*cb = -1/3\n    ca=(-1/3)/cb; sa=np.sqrt(1-ca*ca)\n    return [N+1.03*(ca*m+sa*p), N+1.03*(ca*m-sa*p)]\nen_at=[('N',N1),('N',N2),('C',C1),('C',C2)]\nen_at+= [('H',h) for h in nh2(N1,Sn,C1)]\nen_at+= [('H',h) for h in nh2(N2,Sn,C2)]\nen_at+= [('H',h) for h in nh2(C1,N1,C2)]\nen_at+= [('H',h) for h in nh2(C2,N2,C1)]\n\natoms=[('Sn',Sn)]\ndef phenyl(ipso,axis,normal):\n    a=axis/np.linalg.norm(axis); n=normal/np.linalg.norm(normal)\n    n=n-(n@a)*a; n/=np.linalg.norm(n); w=np.cross(n,a)\n    center=ipso+1.39*a; e1=-a; ring=[]\n    for k in range(6): ring.append(center+1.39*(np.cos(np.radians(60*k))*e1+np.sin(np.radians(60*k))*w))\n    out=[('C',c) for c in ring]\n    for k in range(1,6):\n        dd=(ring[k]-center)/np.linalg.norm(ring[k]-center); out.append(('H',ring[k]+1.09*dd))\n    return out\ntC1=np.array([0,0,2.15]); tC2=np.array([0,0,-2.15])\ni_Cph1=len(atoms); atoms+=phenyl(tC1,tC1,np.array([0,1,0.0]))\ni_Cph2=len(atoms); atoms+=phenyl(tC2,tC2,np.array([1,0,0.0]))\ni_Nen1=len(atoms)+0; i_Nen2=len(atoms)+1\natoms+=en_at\n\ndef kabsch(P,Q):\n    Pc=P.mean(0); Qc=Q.mean(0); H=(P-Pc).T@(Q-Qc)\n    U,S,Vt=np.linalg.svd(H); d=np.sign(np.linalg.det(Vt.T@U.T))\n    R=Vt.T@np.diag([1,1,d])@U.T; return R, Qc-R@Pc\nP3=P2d\nR,t=kabsch(P3,T)\nY3=(R@X2d.T).T+t\ni_O1=len(atoms)+ix['iO1']; i_Nazo=len(atoms)+ix['iN3']; i_O2=len(atoms)+ix['iO2']\nfor s,c in zip(syms,Y3): atoms.append((s,c))\n\nwith open('init.xyz','w') as f:\n    f.write(f\"{len(atoms)}\\ninitial Sn complex\\n\")\n    for s,c in atoms: f.write(f\"{s} {c[0]:.6f} {c[1]:.6f} {c[2]:.6f}\\n\")\nXall=np.array([c for _,c in atoms]); els=[s for s,_ in atoms]\nd=lambda a,b: float(np.linalg.norm(Xall[a]-Xall[b]))\nprint(\"Sn-O1\",round(d(0,i_O1),2),\"Sn-Nazo\",round(d(0,i_Nazo),2),\"Sn-O2\",round(d(0,i_O2),2),\n      \"Sn-Nen1\",round(d(0,i_Nen1),2),\"Sn-Nen2\",round(d(0,i_Nen2),2),\"Sn-C1\",round(d(0,i_Cph1),2),\"Sn-C2\",round(d(0,i_Cph2),2))\ncov={'H':0.31,'C':0.76,'N':0.71,'O':0.66,'Br':1.20,'Sn':1.39}\nbad=[(round(d(i,j),2),els[i],i,els[j],j) for i,j in itertools.combinations(range(len(Xall)),2)\n     if d(i,j)<0.80*(cov[els[i]]+cov[els[j]])]\nprint(\"clashes:\",bad)\nprint(\"IDX\",i_Cph1,i_Cph2,i_Nen1,i_Nen2,i_O1,i_Nazo,i_O2)\nEOF\npython3 build6.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 21237,
+   "output_tokens": 3426,
+   "total_tokens": 24663,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 18432
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 1406
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "pincer angles: 90.0 171.3 237.1\nen span 77.4 angles 304.8 382.2 gap 67.8\ncheck en bonds: 1.46 1.46 1.52\nSn-O1 1.87 Sn-Nazo 2.35 Sn-O2 1.86 Sn-Nen1 2.32 Sn-Nen2 2.32 Sn-C1 2.15 Sn-C2 2.15\nclashes: []\nIDX 1 12 23 24 41 42 51\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_8819c937eea3438e842af7db"
+ },
+ {
+  "type": "AIMessage",
+  "content": "No clashes and reasonable bond distances. Let me view the initial structure:\n\n",
+  "tool_calls": [
+   {
+    "name": "view_molecule",
+    "args": {
+     "xyz_file_relative_path": "init.xyz",
+     "left_right_deg": 0,
+     "up_down_deg": 0,
+     "reset_view": true
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 23426,
+   "output_tokens": 264,
+   "total_tokens": 23690,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 20736
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 175
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[image]",
+  "name": "view_molecule",
+  "tool_call_id": "call_44001a9981004a3184dfc1e8"
+ },
+ {
+  "type": "AIMessage",
+  "content": "View down the axial axis to see the equatorial arrangement:\n\n",
+  "tool_calls": [
+   {
+    "name": "view_molecule",
+    "args": {
+     "xyz_file_relative_path": "init.xyz",
+     "left_right_deg": 0,
+     "up_down_deg": 90,
+     "reset_view": true
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 24526,
+   "output_tokens": 147,
+   "total_tokens": 24673,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 23040
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 58
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[image]",
+  "name": "view_molecule",
+  "tool_call_id": "call_bd61bff032234fdc9ce9d029"
+ },
+ {
+  "type": "AIMessage",
+  "content": "The equatorial pincer + en chelation looks correct. Now refine with constrained xTB (charge \u22121, closed shell):\n\n",
+  "tool_calls": [
+   {
+    "name": "constraint_xtb",
+    "args": {
+     "input_xyz": "init.xyz",
+     "output_xyz": "opt1.xyz",
+     "gfn_method": "gfn2",
+     "charge": -1,
+     "uhf": 0,
+     "force_constant": 0.5,
+     "distance_constraints": [
+      {
+       "atoms": [
+        0,
+        41
+       ],
+       "value": 1.95
+      },
+      {
+       "atoms": [
+        0,
+        42
+       ],
+       "value": 2.3
+      },
+      {
+       "atoms": [
+        0,
+        51
+       ],
+       "value": 1.95
+      },
+      {
+       "atoms": [
+        0,
+        23
+       ],
+       "value": 2.32
+      },
+      {
+       "atoms": [
+        0,
+        24
+       ],
+       "value": 2.32
+      },
+      {
+       "atoms": [
+        0,
+        1
+       ],
+       "value": 2.15
+      },
+      {
+       "atoms": [
+        0,
+        12
+       ],
+       "value": 2.15
+      }
+     ],
+     "ncores": 4
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 25625,
+   "output_tokens": 704,
+   "total_tokens": 26329,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 24192
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 418
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "{\"return_code\": 0, \"output_xyz\": \"/h/400/skaxu/elagenteworkdir/mol_0149_8314f5f8_qwen3.8-max/opt1.xyz\", \"log_path\": \"/h/400/skaxu/elagenteworkdir/mol_0149_8314f5f8_qwen3.8-max/opt1.log\", \"error_msg\": null}",
+  "name": "constraint_xtb",
+  "tool_call_id": "call_6f9a60c10e9e4f878b41510e"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python3 - << 'EOF'\nimport numpy as np, itertools\nlines=open('opt1.xyz').read().split('\\n')\nn=int(lines[0]); els=[];X=[]\nfor l in lines[2:2+n]:\n    p=l.split(); els.append(p[0]); X.append([float(v) for v in p[1:4]])\nX=np.array(X)\nd=lambda a,b: float(np.linalg.norm(X[a]-X[b]))\nprint(\"Sn-O1\",round(d(0,41),2),\"Sn-Nazo\",round(d(0,42),2),\"Sn-O2\",round(d(0,51),2),\n      \"Sn-N23\",round(d(0,23),2),\"Sn-N24\",round(d(0,24),2),\"Sn-C1\",round(d(0,1),2),\"Sn-C12\",round(d(0,12),2))\ncov={'H':0.31,'C':0.76,'N':0.71,'O':0.66,'Br':1.20,'Sn':1.39}\nbad=[(round(d(i,j),2),els[i],i,els[j],j) for i,j in itertools.combinations(range(n),2)\n     if d(i,j)<0.75*(cov[els[i]]+cov[els[j]])]\nprint(\"clashes:\",bad[:10], len(bad))\n# key ligand bonds\nprint(\"N=N\",round(d(42,43),2),\"C-O\",round(d(50,51),2),round(d(35,41+10),2) if False else \"\")\nEOF\ntail -5 opt1.log"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 26024,
+   "output_tokens": 430,
+   "total_tokens": 26454,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 25600
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 15
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "Sn-O1 1.98 Sn-Nazo 2.3 Sn-O2 1.97 Sn-N23 2.34 Sn-N24 2.34 Sn-C1 2.16 Sn-C12 2.16\nclashes: [] 0\nN=N 1.32 C-O 1.32 \n ANC optimizer:\n * wall-time:     0 d,  0 h,  0 min,  5.149 sec\n *  cpu-time:     0 d,  0 h,  0 min, 16.755 sec\n * ratio c/w:     3.254 speedup\n\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_2adb18117100406dbf22752f"
+ },
+ {
+  "type": "AIMessage",
+  "content": "Constraints held well. Let me check convergence and view the optimized structure:\n\n",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "grep -E \"CYCLE|converged|GEOMETRY OPTIMIZATION\" opt1.log | tail -8; head -2 opt1.xyz"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 26610,
+   "output_tokens": 105,
+   "total_tokens": 26715,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 25600
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 30
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": ".............................. CYCLE   47 ..............................\n.............................. CYCLE   48 ..............................\n.............................. CYCLE   49 ..............................\n.............................. CYCLE   50 ..............................\n.............................. CYCLE   51 ..............................\n.............................. CYCLE   52 ..............................\n.............................. CYCLE   53 ..............................\n   *** GEOMETRY OPTIMIZATION CONVERGED AFTER 53 ITERATIONS ***\n59\n energy: -98.139047375858 gnorm: 0.000443366479 xtb: 6.7.1 (edcfbbe)\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_8fa452175cd44ddab149f63b"
+ },
+ {
+  "type": "AIMessage",
+  "content": "Converged. Let me view the optimized structure:\n\n",
+  "tool_calls": [
+   {
+    "name": "view_molecule",
+    "args": {
+     "xyz_file_relative_path": "opt1.xyz",
+     "left_right_deg": 0,
+     "up_down_deg": 0,
+     "reset_view": true
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 26854,
+   "output_tokens": 134,
+   "total_tokens": 26988,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 26496
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 46
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[image]",
+  "name": "view_molecule",
+  "tool_call_id": "call_c894a6fa20df4ca892773532"
+ },
+ {
+  "type": "AIMessage",
+  "content": "The structure is a proper 7-coordinate Sn(III) complex matching the drawing. Final validation and saving as answer.xyz:\n\n",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python3 - << 'EOF'\nimport numpy as np\nlines=open('opt1.xyz').read().split('\\n')\nn=int(lines[0]); els=[];X=[]\nfor l in lines[2:2+n]:\n    p=l.split(); els.append(p[0]); X.append([float(v) for v in p[1:4]])\nX=np.array(X)\nd=lambda a,b: float(np.linalg.norm(X[a]-X[b]))\n# connectivity audit\npairs = {\"Sn-O1\":(0,41),\"Sn-Nazo\":(0,42),\"Sn-O2\":(0,51),\"Sn-Nen1\":(0,23),\"Sn-Nen2\":(0,24),\n         \"Sn-Cph1\":(0,1),\"Sn-Cph2\":(0,12),\"N=N\":(42,43),\"C-O(A)\":(35,41),\"C-O(B)\":(45+5,51),\n         \"C-Br(A)\":(39,44),\"C-Br(B)\":(48,52),\"en N-C\":(23,25),\"en C-C\":(25,26),\"en C-N\":(26,24)}\nfor k,(a,b) in pairs.items(): print(k, round(d(a,b),2))\nfrom collections import Counter\nprint(Counter(els))\nwith open('answer.xyz','w') as f:\n    f.write(f\"{n}\\nSn(III) complex: 2 phenyl + ethylenediammonium + tridentate azo-bis(4-bromophenolate), charge -1\\n\")\n    for s,c in zip(els,X): f.write(f\"{s} {c[0]:.6f} {c[1]:.6f} {c[2]:.6f}\\n\")\nprint(\"written answer.xyz\")\nEOF\nls -la answer.xyz"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 27952,
+   "output_tokens": 1123,
+   "total_tokens": 29075,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 26624
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 639
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "Sn-O1 1.98\nSn-Nazo 2.3\nSn-O2 1.97\nSn-Nen1 2.34\nSn-Nen2 2.34\nSn-Cph1 2.16\nSn-Cph2 2.16\nN=N 1.32\nC-O(A) 1.32\nC-O(B) 1.32\nC-Br(A) 1.92\nC-Br(B) 1.92\nen N-C 1.44\nen C-C 1.53\nen C-N 1.45\nCounter({'C': 26, 'H': 24, 'N': 4, 'O': 2, 'Br': 2, 'Sn': 1})\nwritten answer.xyz\n-rw-r--r-- 1 root root 1918 Sep 27 18:21 answer.xyz\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_e85ad28cc9cf4782ad2562f6"
+ },
+ {
+  "type": "AIMessage",
+  "content": "All metrics are chemically sound. Final check of the answer file:\n\n",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "head -5 answer.xyz; echo ...; wc -l answer.xyz"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 28665,
+   "output_tokens": 204,
+   "total_tokens": 28869,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 27648
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 146
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "59\nSn(III) complex: 2 phenyl + ethylenediammonium + tridentate azo-bis(4-bromophenolate), charge -1\nSn -0.098056 -0.044284 0.122636\nC 0.082787 -0.061079 2.271285\nC 1.269668 -0.049256 2.989821\n...\n61 answer.xyz\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_943de94a8541431080dcae2d"
+ },
+ {
+  "type": "AIMessage",
+  "content": "The 3D structure is complete and saved. \n\n**Summary of what was built from the 2D drawing:**\n- **Central Sn** in a 7-coordinate pentagonal-bipyramidal environment:\n  - **Axial:** two \u03c3-bonded phenyl rings (Sn\u2013C \u2248 2.16 \u00c5)\n  - **Equatorial:** tridentate **azo-bis(4-bromophenolate)** ligand chelating through O, O (Sn\u2013O \u2248 1.98 \u00c5) and one azo nitrogen (Sn\u2013N \u2248 2.30 \u00c5), with the N=N bridge (1.32 \u00c5) and para-Br substituents on both phenolate rings, plus bidentate **ethylenediamine** (drawn as H\u2082N\u207a/NH\u2082\u207a, Sn\u2013N \u2248 2.34 \u00c5)\n- Overall charge \u22121 (Sn\u00b3\u207b + two N\u207a), closed-shell singlet\n- Geometry: fragment-assembled initial structure (analytic wrapped pincer matched to solved equatorial bite angles) refined with constrained GFN2-xTB; all 7 Sn\u2013ligand distance constraints held within ~2\u20133% and no steric clashes remain\n\n`answer.xyz` (59 atoms: Sn C\u2082\u2086 H\u2082\u2084 N\u2084 O\u2082 Br\u2082, with all explicit hydrogens) exists in the working directory.",
+  "usage": {
+   "input_tokens": 28871,
+   "output_tokens": 477,
+   "total_tokens": 29348,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 27648
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 167
+   }
+  }
+ }
+]

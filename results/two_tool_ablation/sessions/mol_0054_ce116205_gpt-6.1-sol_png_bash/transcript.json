@@ -1,0 +1,374 @@
+[
+ {
+  "type": "SystemMessage",
+  "content": "You are a helpful chemistry assistant. You build 3D molecular\n  structures from the chemical information you are given, including 2D drawings\n  supplied as images.\n\n  When you are given a 2D drawing of a molecule, your task is to produce the 3D\n  structure that drawing depicts and save it as `answer.xyz` in your working\n  directory.\n\n  Requirements for `answer.xyz`:\n  - Include all explicit hydrogens.\n  - Use a right-handed Cartesian coordinate system, units of angstroms.\n  - Standard XYZ format: first line is the total atom count, second line a\n    one-line comment, each remaining line `Element X Y Z`.\n\n  When you are done, confirm that `answer.xyz` exists in the working directory.\n  "
+ },
+ {
+  "type": "HumanMessage",
+  "content": "A 2D structure of a molecule is provided as a PNG file in your working directory: mol_0054.png\n\nBuild the 3D structure it depicts and save it as answer.xyz.\n"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "view_png_file",
+    "args": {
+     "png_file_relative_path": "mol_0054.png"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 447,
+   "output_tokens": 26,
+   "total_tokens": 473,
+   "input_token_details": {
+    "cache_read": 0
+   },
+   "output_token_details": {
+    "reasoning": 0
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[image]",
+  "name": "view_png_file",
+  "tool_call_id": "call_1ab85aa3286c52218e5e16a182066549"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "ls -la; python - <<'PY'\nimport importlib.util\nfor p in ['rdkit','numpy','scipy','ase','pyscf']:\n print(p, bool(importlib.util.find_spec(p)))\nPY"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 1032,
+   "output_tokens": 337,
+   "total_tokens": 1369,
+   "input_token_details": {
+    "cache_read": 0
+   },
+   "output_token_details": {
+    "reasoning": 267
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "total 42\ndrwxr-xr-x  2 root root     3 Oct 15 14:41 .\ndrwxr-xr-x 57 root root    57 Oct 15 14:41 ..\n-rw-r--r--  1 root root 31898 Oct 15 14:41 mol_0054.png\nrdkit True\nnumpy True\nscipy True\nase True\npyscf False\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_38ac264b4d3e5188a6f9b8cbb07de38f"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > build.py <<'PY'\nimport numpy as np\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem\nfrom scipy.optimize import minimize\nfrom scipy.spatial.transform import Rotation\n\nrng=np.random.default_rng(54)\nsmiles=['[O-]C(c1ccccc1)/C(C)=C/C']+['O=CN(C)C']*3\nmols=[]; base=[]; ffs=[]\nfor smi in smiles:\n m=Chem.AddHs(Chem.MolFromSmiles(smi))\n ids=AllChem.EmbedMultipleConfs(m, numConfs=20, randomSeed=54)\n opt=AllChem.MMFFOptimizeMoleculeConfs(m)\n cid=ids[min(range(len(opt)),key=lambda i:opt[i][1])]\n xyz=np.array(m.GetConformer(cid).GetPositions()); xyz-=xyz[0]\n # bring selected coordinates to conformer 0 and remove remaining conformers\n conf=Chem.Conformer(m.GetNumAtoms())\n for i,p in enumerate(xyz): conf.SetAtomPosition(i,p)\n m.RemoveAllConformers();m.AddConformer(conf)\n props=AllChem.MMFFGetMoleculeProperties(m)\n ff=AllChem.MMFFGetMoleculeForceField(m,props,confId=0)\n mols.append(m);base.append(xyz);ffs.append(ff)\n print(smi, Chem.rdMolDescriptors.CalcMolFormula(m), [(b.GetBeginAtomIdx(),b.GetEndAtomIdx(),str(b.GetStereo())) for b in m.GetBonds() if b.GetBondType()==Chem.BondType.DOUBLE])\n\ns=2**-.5\n# Camera projection tilted so front bonds project slightly downwards.\ntilt=.28\nRy=np.array([[1,0,0],[0,np.cos(tilt),-np.sin(tilt)],[0,np.sin(tilt),np.cos(tilt)]])\nu=np.array([[-s,0,s],[-s,0,-s],[s,0,s],[0,-1,0]])@Ry.T\n# Cl top, Cl back-right\ncldirs=np.array([[0,1,0],[s,0,-s]])@Ry.T\norigins=u*np.array([1.88,2.04,2.04,2.04])[:,None]\ncl=2.31*cldirs\n# ligand local frame: O->C is e1, in-plane substituent e2\nframes=[]\nfor xyz,m in zip(base,mols):\n e1=xyz[1]/np.linalg.norm(xyz[1]);\n nxt=[a.GetIdx() for a in m.GetAtomWithIdx(1).GetNeighbors() if a.GetIdx()!=0 and a.GetAtomicNum()>1][0]\n v=xyz[nxt]-xyz[1];e2=v-e1*np.dot(v,e1);e2/=np.linalg.norm(e2)\n frames.append(np.column_stack((e1,e2,np.cross(e1,e2))))\n\n# Construct rigid ligands with angle Cr-O-C = 130 degrees and choose orientation variables.\ndef pose(params):\n out=[]\n for j in range(4):\n  alpha,beta=params[j*2:j*2+2]\n  ax=np.array([0.,0.,1.])\n  if abs(np.dot(ax,u[j]))>.9:ax=np.array([1.,0.,0.])\n  v=ax-np.dot(ax,u[j])*u[j];v/=np.linalg.norm(v)\n  w=np.cross(u[j],v)\n  az=np.cos(alpha)*v+np.sin(alpha)*w\n  e1=np.cos(np.deg2rad(50))*u[j]+np.sin(np.deg2rad(50))*az\n  e2=-np.sin(np.deg2rad(50))*u[j]+np.cos(np.deg2rad(50))*az\n  e2=Rotation.from_rotvec(beta*e1).apply(e2)\n  R=np.column_stack((e1,e2,np.cross(e1,e2)))@frames[j].T\n  out.append(base[j]@R.T+origins[j])\n return out\n\n# nonbonded inter-fragment radii calibrated to vdW pair minima\nrad={'H':1.20,'C':1.70,'N':1.55,'O':1.52,'Cl':1.75,'Cr':1.65}\nsymbols=[['Cr'],['Cl','Cl']]+[[a.GetSymbol() for a in m.GetAtoms()] for m in mols]\nradii=[np.array([rad[e] for e in ss]) for ss in symbols]\n# Donor O pairs near metal are not treated as van der Waals contacts.\ndef inter_energy_grad(coords,grad=False):\n arrays=[np.zeros((1,3)),cl]+coords\n grads=[np.zeros_like(a) for a in arrays]\n energy=0.\n for a in range(len(arrays)):\n  for b in range(a+1,len(arrays)):\n   if a==0 and b==1:continue\n   diff=arrays[a][:,None,:]-arrays[b][None,:,:]\n   r=np.linalg.norm(diff,axis=2)\n   sigma=(radii[a][:,None]+radii[b][None,:])*.90\n   if a==0:\n    sigma[:]=2.65\n    sigma[:,0]=0 # bonded oxygens\n   # weak repulsive overlap potential; LJ-like short-range rise\n   ratio=sigma/np.maximum(r,.5)\n   mask=ratio>1\n   q=np.where(mask,ratio,1.)\n   en=.12*(q**12-2*q**6+1)\n   energy+=en.sum()\n   deriv=np.where(mask,.12*(-12*q**12+12*q**6)/r,0.)\n   dg=deriv[:,:,None]*diff/r[:,:,None]\n   grads[a]+=np.sum(dg,axis=1);grads[b]-=np.sum(dg,axis=0)\n return (energy,grads[2:]) if grad else energy\n\nbest=None\nfor k in range(32):\n p=rng.uniform(-np.pi,np.pi,8)\n res=minimize(lambda p:inter_energy_grad(pose(p)),p,method='BFGS',options={'maxiter':220,'gtol':1e-5})\n if best is None or res.fun<best.fun: best=res; print('rigid best',k,best.fun,flush=True)\ncoords=pose(best.x)\n\n# Fix O centers; allow all other fragment atoms to relax, with intrafragment MMFF\nsizes=[len(a)-1 for a in coords];ends=np.cumsum([0]+sizes)\ndef unpack(x):\n a=x.reshape(-1,3)\n return [np.vstack([origins[j],a[ends[j]:ends[j+1]]]) for j in range(4)]\ndef energy_grad(x):\n cs=unpack(x);energy,grads=inter_energy_grad(cs,True)\n for j,(c,ff) in enumerate(zip(cs,ffs)):\n  pos=c.ravel().tolist()\n  energy+=ff.CalcEnergy(pos)\n  grads[j]+=np.array(ff.CalcGrad(pos)).reshape(-1,3)\n  # Cr-O-C angle soft restraint: 130 deg (+/- some distortion)\n  d=c[1]-c[0];r=np.linalg.norm(d);v=d/r\n  co=np.dot(v,u[j]);target=np.cos(np.deg2rad(50))\n  energy+=25*(co-target)**2\n  g=50*(co-target)*(u[j]-co*v)/r\n  grads[j][1]+=g;grads[j][0]-=g\n return energy,np.vstack([g[1:] for g in grads]).ravel()\nx0=np.vstack([c[1:] for c in coords]).ravel()\nres=minimize(energy_grad,x0,jac=True,method='L-BFGS-B',options={'maxiter':2400,'ftol':1e-11,'gtol':2e-5,'maxls':40})\nprint('flexible',res.success,res.message,res.fun)\ncoords=unpack(res.x)\nallcoords=np.vstack([np.zeros((1,3)),cl]+coords)\nallsymbols=[s for arr in symbols for s in arr]\nwith open('answer.xyz','w') as f:\n f.write(str(len(allsymbols))+'\\n')\n f.write('Octahedral Cr(III): two cis chloride, three O-bound DMF, and E-allylic alkoxide; S=3/2\\n')\n for s,p in zip(allsymbols,allcoords):f.write(f'{s:2s} {p[0]: .8f} {p[1]: .8f} {p[2]: .8f}\\n')\nnp.savez('model.npz',xyz=allcoords,symbols=allsymbols)\nprint('Wrote answer.xyz atoms:',len(allsymbols))\n# Report coordination angles\nfor j,c in enumerate(coords):\n co=np.dot((c[1]-c[0])/np.linalg.norm(c[1]-c[0]),-u[j]);print('CrOC',j,np.degrees(np.arccos(co)))\nPY\nOPENBLAS_NUM_THREADS=1 python build.py",
+     "timeout": 200000
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 1474,
+   "output_tokens": 3126,
+   "total_tokens": 4600,
+   "input_token_details": {
+    "cache_read": 0
+   },
+   "output_token_details": {
+    "reasoning": 1034
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[TIMEOUT]",
+  "name": "bash_kernel",
+  "tool_call_id": "call_3745270537345fcf829f3d617df013bd"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "ls -l; ps aux | grep build | grep -v grep; test -f answer.xyz && head answer.xyz"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 4616,
+   "output_tokens": 64,
+   "total_tokens": 4680,
+   "input_token_details": {
+    "cache_read": 1323
+   },
+   "output_token_details": {
+    "reasoning": 20
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "total 41\n-rw-r--r-- 1 root root  5470 Oct 15 14:44 build.py\n-rw-r--r-- 1 root root 31898 Oct 15 14:41 mol_0054.png\nroot      788634  0.0  0.0   4928  3452 ?        S    14:42   0:00 bash -c mount -t tmpfs -o size=1k none /h/400/skaxu/.agentnet_quarantine 2>/dev/null || true cd /h/400/skaxu/elagenteworkdir_png_bash_20261015/mol_0044_ce116205_gpt-6.1-sol_png_bash || exit 1 cp molecule.pkl bad_start.pkl; cp optimized.npy bad_opt.npy; cp build.py build_unconstrained.py python - <<'PY' p='build.py' s=open(p).read();s=s.replace(\"r=AllChem.EmbedMolecule(m,p);print('result',r)\",\"\"\"from rdkit.Geometry import Point3D positions={'Co1':[0,0,0],'Co2':[0,0,-2.4],'Nc':[0,0,2.13]} for k in range(3):  phi=k*2*np.pi/3  positions[f'Na{k}']=[1.96*np.sin(np.radians(80))*np.cos(phi),1.96*np.sin(np.radians(80))*np.sin(phi),1.96*np.cos(np.radians(80))]  if k in [1,2]:positions[f'P{k}']=[2.24*np.cos(phi),2.24*np.sin(phi),-2.4] positions['Nim']=[1.72*np.sin(np.radians(145)),0,-2.4+1.72*np.cos(np.radians(145))] positions['Ndist']=np.array(positions['Nim'])+[1.4*np.sin(np.radians(145)),0,1.4*np.cos(np.radians(145))] p.SetCoordMap({indices[k]:Point3D(*map(float,v)) for k,v in positions.items()}) p.ignoreSmoothingFailures=True r=AllChem.EmbedMolecule(m,p);print('result',r)\"\"\") open(p,'w').write(s) PY python build.py python inspect_structure.py OPENBLAS_NUM_THREADS=1 python optimize.py\nroot      788720 97.4  0.0 193332 73584 ?        R    14:42   2:58 python build.py\nroot      808197 95.4  0.0 455044 113912 ?       R    14:44   1:00 python build.py\nroot      812580  0.0  0.0   3228   992 ?        S    14:44   0:00 unshare --user --map-root-user --mount --net --fork bash -c mount -t tmpfs -o size=1k none /h/400/skaxu/.agentnet_quarantine 2>/dev/null || true cd /h/400/skaxu/elagenteworkdir_png_bash_20261015/mol_0058_ce116205_gpt-6.1-sol_png_bash || exit 1 cat > build.py <<'PY' import numpy as np from rdkit import Chem from rdkit.Chem import AllChem from scipy.optimize import minimize  sm='C/C(=N\\\\c1c(C)cccc1C)[N-][C@H](c1ccccn1)[C@@](O)(c1ccccc1)C(F)(F)F' lig=Chem.AddHs(Chem.MolFromSmiles(sm)) p=AllChem.ETKDGv3();p.randomSeed=58021;p.numThreads=0 ids=AllChem.EmbedMultipleConfs(lig,numConfs=32,params=p) props=AllChem.MMFFGetMoleculeProperties(lig)  # energy helpers, Cartesian analytic gradients  def dist(x,g,i,j,d,k):  v=x[i]-x[j];r=np.linalg.norm(v);delta=r-d  gr=2*k*delta*v/r;g[i]+=gr;g[j]-=gr  return k*delta**2  def angle(x,g,i,j,k,t,w):  u=x[i]-x[j];v=x[k]-x[j];a=np.linalg.norm(u);b=np.linalg.norm(v)  uv=np.dot(u,v)/(a*b);delta=uv-t  gu=2*w*delta*(v/(a*b)-uv*u/a**2)  gv=2*w*delta*(u/(a*b)-uv*v/b**2)  g[i]+=gu;g[k]+=gv;g[j]-=gu+gv  return w*delta**2  ff=AllChem.MMFFGetMoleculeForceField(lig,props,confId=int(ids[0])) def basefun(flat,ff,metal=False):  x=flat.reshape(-1,3);g=np.zeros_like(x)  e=ff.CalcEnergy(x[:54].ravel().tolist());g[:54]=np.array(ff.CalcGrad(x[:54].ravel().tolist())).reshape(-1,3)  # The drawn intramolecular O-H...N hydrogen bond.  e+=dist(x,g,20,2,2.75,14)  e+=dist(x,g,48,2,1.80,18)  e+=angle(x,g,20,48,2,-1.,20)  if not metal:   e+=dist(x,g,11,18,2.69,100)  else:   e+=dist(x,g,54,11,2.06,160)   e+=dist(x,g,54,18,2.11,160)   for a in [13,17]:e+=angle(x,g,54,18,a,np.cos(np.deg2rad(121)),65)   for a in [1,12]:e+=angle(x,g,54,11,a,-.5,65)   e+=angle(x,g,11,54,18,np.cos(np.deg2rad(80)),30)   # No additional bond from Ir to OH or the imine N.   for i,a in enumerate(lig.GetAtoms()):    if i in [11,18]:continue    rad={'H':1.90,'C':2.55,'N':2.60,'O':2.60,'F':2.65}[a.GetSymbol()]    if np.linalg.norm(x[i]-x[54])<rad:e+=dist(x,g,i,54,rad,20)  return e,g.ravel()  candidates=[] for cid in ids:  ff=AllChem.MMFFGetMoleculeForceField(lig,props,confId=int(cid))  x=np.array(lig.GetConformer(int(cid)).GetPositions())  r=minimize(lambda y:basefun(y,ff),x.ravel(),jac=True,method='L-BFGS-B',options={'maxiter':600,'ftol':1e-9})  x=r.x.reshape(-1,3)  vec=2*x[18]-x[13]-x[17];vec/=np.linalg.norm(vec)  ir=x[18]+vec*2.11  xm=np.vstack([x,ir])  r=minimize(lambda y:basefun(y,ff,True),xm.ravel(),jac=True,method='L-BFGS-B',options={'maxiter':1000,'ftol':1e-9})  x=r.x.reshape(-1,3)  candidates.append((r.fun,x.copy(),int(cid))) print('Ligand-metal candidates:',sorted([round(c[0],3) for c in candidates]))  cp=Chem.AddHs(Chem.MolFromSmiles('[c-]1(C)c(C)c(C)c(C)c1C')) AllChem.EmbedMolecule(cp,randomSeed=54) AllChem.MMFFOptimizeMolecule(cp) cpff=AllChem.MMFFGetMoleculeForceField(cp,AllChem.MMFFGetMoleculeProperties(cp)) y=np.array(cp.GetConformer().GetPositions());ring=[0,2,4,6,8];y-=y[ring].mean(0) normal=np.cross(y[2]-y[0],y[4]-y[0]);normal/=np.linalg.norm(normal) e1=y[0]/np.linalg.norm(y[0]);e1-=normal*np.dot(normal,e1);e1/=np.linalg.norm(e1);e2=np.cross(normal,e1) y=y@np.stack([e1,e2,normal],axis=1) ringi=np.array(ring)+55  def fullfun(flat,ff):  x=flat.reshape(-1,3);e,gg=basefun(x[:55].ravel(),ff,True);g=np.zeros_like(x);g[:55]=gg.reshape(-1,3)  e+=cpff.CalcEnergy(x[55:].ravel().tolist());g[55:]=np.array(cpff.CalcGrad(x[55:].ravel().tolist())).reshape(-1,3)  for i in ringi:e+=dist(x,g,54,i,2.20,100)  # angle of the cap centroid relative to the donor atoms  center=x[ringi].mean(0)  xx=np.vstack([x,center]);gg=np.zeros_like(xx)  e+=dist(xx,gg,80,54,1.82,70)  for i in [11,18]:e+=angle(xx,gg,80,54,i,np.cos(np.deg2rad(140)),40)  g+=gg[:80];g[ringi]+=gg[80]/5  # excluded-volume interactions between ligand and Cp* cap  elems=[a.GetSymbol() for a in lig.GetAtoms()]+['Ir']+[a.GetSymbol() for a in cp.GetAtoms()]  radii={'C':1.70,'H':1.12,'N':1.55,'O':1.50,'F':1.47}  v=x[:54,None,:]-x[None,55:,:];r=np.linalg.norm(v,axis=2)  rr=np.array([radii[a.GetSymbol()] for a in lig.GetAtoms()])[:,None]+np.array([radii[a.GetSymbol()] for a in cp.GetAtoms()])[None,:]  delta=np.minimum(r-rr,0)  e+=8*np.sum(delta**2)  gr=(16*delta/r)[:,:,None]*v  g[:54]+=gr.sum(axis=1);g[55:]-=gr.sum(axis=0)  return e,g.ravel()  best=None for ec,x,cid in sorted(candidates,key=lambda t:t[0])[:8]:  ff=AllChem.MMFFGetMoleculeForceField(lig,props,confId=cid)  axis=x[54]-(x[11]+x[18])/2;axis/=np.linalg.norm(axis)  ex=x[18]-x[11];ex-=axis*np.dot(ex,axis);ex/=np.linalg.norm(ex);ey=np.cross(axis,ex)  for theta in [0.,np.pi/5]:   ex1=np.cos(theta)*ex+np.sin(theta)*ey;ey1=np.cross(axis,ex1)   yy=y@np.stack([ex1,ey1,axis])+x[54]+1.82*axis   xx=np.vstack([x,yy])   r=minimize(lambda z:fullfun(z,ff),xx.ravel(),jac=True,method='L-BFGS-B',options={'maxiter':1500,'ftol':2e-10,'gtol':1e-4})   print('full',cid,theta,r.fun,r.success)   if best is None or r.fun<best[0]:best=(r.fun,r.x.reshape(-1,3).copy(),cid)  energy,xyz,cid=best xyz-=xyz.mean(axis=0) elems=[a.GetSymbol() for a in lig.GetAtoms()]+['Ir']+[a.GetSymbol() for a in cp.GetAtoms()] with open('answer.xyz','w') as f:  f.write(f'{len(elems)}\\nCp*Ir(III) N,N-chelated chiral amidinate complex; explicit hydrogens; angstroms\\n')  for el,pos in zip(elems,xyz): f.write(f'{el:2s} {pos[0]: .8f} {pos[1]: .8f} {pos[2]: .8f}\\n') np.save('coordinates.npy',xyz) Chem.MolToMolFile(lig,'ligand.mol') print('best',energy,cid,'IrN',np.linalg.norm(xyz[54]-xyz[11]),np.linalg.norm(xyz[54]-xyz[18])) print('Hbond',np.linalg.norm(xyz[48]-xyz[2]),'Cp',np.linalg.norm(xyz[ringi].mean(0)-xyz[54])) # Verify chirality of the optimized coordinates. c=Chem.Conformer(54) for i in range(54):c.SetAtomPosition(i,xyz[i].tolist()) ll=Chem.Mol(lig);ll.RemoveAllConformers();ll.AddConformer(c);Chem.AssignAtomChiralTagsFromStructure(ll,replaceExistingTags=True);Chem.AssignStereochemistry(ll,cleanIt=True,force=True) print('Stereochemistry',[(i,ll.GetAtomWithIdx(i).GetProp('_CIPCode')) for i in [12,19]]) PY OPENBLAS_NUM_THREADS=1 python build.py > build.log 2>&1\nroot      812581  0.0  0.0   4936  3576 ?        S    14:44   0:00 bash -c mount -t tmpfs -o size=1k none /h/400/skaxu/.agentnet_quarantine 2>/dev/null || true cd /h/400/skaxu/elagenteworkdir_png_bash_20261015/mol_0058_ce116205_gpt-6.1-sol_png_bash || exit 1 cat > build.py <<'PY' import numpy as np from rdkit import Chem from rdkit.Chem import AllChem from scipy.optimize import minimize  sm='C/C(=N\\\\c1c(C)cccc1C)[N-][C@H](c1ccccn1)[C@@](O)(c1ccccc1)C(F)(F)F' lig=Chem.AddHs(Chem.MolFromSmiles(sm)) p=AllChem.ETKDGv3();p.randomSeed=58021;p.numThreads=0 ids=AllChem.EmbedMultipleConfs(lig,numConfs=32,params=p) props=AllChem.MMFFGetMoleculeProperties(lig)  # energy helpers, Cartesian analytic gradients  def dist(x,g,i,j,d,k):  v=x[i]-x[j];r=np.linalg.norm(v);delta=r-d  gr=2*k*delta*v/r;g[i]+=gr;g[j]-=gr  return k*delta**2  def angle(x,g,i,j,k,t,w):  u=x[i]-x[j];v=x[k]-x[j];a=np.linalg.norm(u);b=np.linalg.norm(v)  uv=np.dot(u,v)/(a*b);delta=uv-t  gu=2*w*delta*(v/(a*b)-uv*u/a**2)  gv=2*w*delta*(u/(a*b)-uv*v/b**2)  g[i]+=gu;g[k]+=gv;g[j]-=gu+gv  return w*delta**2  ff=AllChem.MMFFGetMoleculeForceField(lig,props,confId=int(ids[0])) def basefun(flat,ff,metal=False):  x=flat.reshape(-1,3);g=np.zeros_like(x)  e=ff.CalcEnergy(x[:54].ravel().tolist());g[:54]=np.array(ff.CalcGrad(x[:54].ravel().tolist())).reshape(-1,3)  # The drawn intramolecular O-H...N hydrogen bond.  e+=dist(x,g,20,2,2.75,14)  e+=dist(x,g,48,2,1.80,18)  e+=angle(x,g,20,48,2,-1.,20)  if not metal:   e+=dist(x,g,11,18,2.69,100)  else:   e+=dist(x,g,54,11,2.06,160)   e+=dist(x,g,54,18,2.11,160)   for a in [13,17]:e+=angle(x,g,54,18,a,np.cos(np.deg2rad(121)),65)   for a in [1,12]:e+=angle(x,g,54,11,a,-.5,65)   e+=angle(x,g,11,54,18,np.cos(np.deg2rad(80)),30)   # No additional bond from Ir to OH or the imine N.   for i,a in enumerate(lig.GetAtoms()):    if i in [11,18]:continue    rad={'H':1.90,'C':2.55,'N':2.60,'O':2.60,'F':2.65}[a.GetSymbol()]    if np.linalg.norm(x[i]-x[54])<rad:e+=dist(x,g,i,54,rad,20)  return e,g.ravel()  candidates=[] for cid in ids:  ff=AllChem.MMFFGetMoleculeForceField(lig,props,confId=int(cid))  x=np.array(lig.GetConformer(int(cid)).GetPositions())  r=minimize(lambda y:basefun(y,ff),x.ravel(),jac=True,method='L-BFGS-B',options={'maxiter':600,'ftol':1e-9})  x=r.x.reshape(-1,3)  vec=2*x[18]-x[13]-x[17];vec/=np.linalg.norm(vec)  ir=x[18]+vec*2.11  xm=np.vstack([x,ir])  r=minimize(lambda y:basefun(y,ff,True),xm.ravel(),jac=True,method='L-BFGS-B',options={'maxiter':1000,'ftol':1e-9})  x=r.x.reshape(-1,3)  candidates.append((r.fun,x.copy(),int(cid))) print('Ligand-metal candidates:',sorted([round(c[0],3) for c in candidates]))  cp=Chem.AddHs(Chem.MolFromSmiles('[c-]1(C)c(C)c(C)c(C)c1C')) AllChem.EmbedMolecule(cp,randomSeed=54) AllChem.MMFFOptimizeMolecule(cp) cpff=AllChem.MMFFGetMoleculeForceField(cp,AllChem.MMFFGetMoleculeProperties(cp)) y=np.array(cp.GetConformer().GetPositions());ring=[0,2,4,6,8];y-=y[ring].mean(0) normal=np.cross(y[2]-y[0],y[4]-y[0]);normal/=np.linalg.norm(normal) e1=y[0]/np.linalg.norm(y[0]);e1-=normal*np.dot(normal,e1);e1/=np.linalg.norm(e1);e2=np.cross(normal,e1) y=y@np.stack([e1,e2,normal],axis=1) ringi=np.array(ring)+55  def fullfun(flat,ff):  x=flat.reshape(-1,3);e,gg=basefun(x[:55].ravel(),ff,True);g=np.zeros_like(x);g[:55]=gg.reshape(-1,3)  e+=cpff.CalcEnergy(x[55:].ravel().tolist());g[55:]=np.array(cpff.CalcGrad(x[55:].ravel().tolist())).reshape(-1,3)  for i in ringi:e+=dist(x,g,54,i,2.20,100)  # angle of the cap centroid relative to the donor atoms  center=x[ringi].mean(0)  xx=np.vstack([x,center]);gg=np.zeros_like(xx)  e+=dist(xx,gg,80,54,1.82,70)  for i in [11,18]:e+=angle(xx,gg,80,54,i,np.cos(np.deg2rad(140)),40)  g+=gg[:80];g[ringi]+=gg[80]/5  # excluded-volume interactions between ligand and Cp* cap  elems=[a.GetSymbol() for a in lig.GetAtoms()]+['Ir']+[a.GetSymbol() for a in cp.GetAtoms()]  radii={'C':1.70,'H':1.12,'N':1.55,'O':1.50,'F':1.47}  v=x[:54,None,:]-x[None,55:,:];r=np.linalg.norm(v,axis=2)  rr=np.array([radii[a.GetSymbol()] for a in lig.GetAtoms()])[:,None]+np.array([radii[a.GetSymbol()] for a in cp.GetAtoms()])[None,:]  delta=np.minimum(r-rr,0)  e+=8*np.sum(delta**2)  gr=(16*delta/r)[:,:,None]*v  g[:54]+=gr.sum(axis=1);g[55:]-=gr.sum(axis=0)  return e,g.ravel()  best=None for ec,x,cid in sorted(candidates,key=lambda t:t[0])[:8]:  ff=AllChem.MMFFGetMoleculeForceField(lig,props,confId=cid)  axis=x[54]-(x[11]+x[18])/2;axis/=np.linalg.norm(axis)  ex=x[18]-x[11];ex-=axis*np.dot(ex,axis);ex/=np.linalg.norm(ex);ey=np.cross(axis,ex)  for theta in [0.,np.pi/5]:   ex1=np.cos(theta)*ex+np.sin(theta)*ey;ey1=np.cross(axis,ex1)   yy=y@np.stack([ex1,ey1,axis])+x[54]+1.82*axis   xx=np.vstack([x,yy])   r=minimize(lambda z:fullfun(z,ff),xx.ravel(),jac=True,method='L-BFGS-B',options={'maxiter':1500,'ftol':2e-10,'gtol':1e-4})   print('full',cid,theta,r.fun,r.success)   if best is None or r.fun<best[0]:best=(r.fun,r.x.reshape(-1,3).copy(),cid)  energy,xyz,cid=best xyz-=xyz.mean(axis=0) elems=[a.GetSymbol() for a in lig.GetAtoms()]+['Ir']+[a.GetSymbol() for a in cp.GetAtoms()] with open('answer.xyz','w') as f:  f.write(f'{len(elems)}\\nCp*Ir(III) N,N-chelated chiral amidinate complex; explicit hydrogens; angstroms\\n')  for el,pos in zip(elems,xyz): f.write(f'{el:2s} {pos[0]: .8f} {pos[1]: .8f} {pos[2]: .8f}\\n') np.save('coordinates.npy',xyz) Chem.MolToMolFile(lig,'ligand.mol') print('best',energy,cid,'IrN',np.linalg.norm(xyz[54]-xyz[11]),np.linalg.norm(xyz[54]-xyz[18])) print('Hbond',np.linalg.norm(xyz[48]-xyz[2]),'Cp',np.linalg.norm(xyz[ringi].mean(0)-xyz[54])) # Verify chirality of the optimized coordinates. c=Chem.Conformer(54) for i in range(54):c.SetAtomPosition(i,xyz[i].tolist()) ll=Chem.Mol(lig);ll.RemoveAllConformers();ll.AddConformer(c);Chem.AssignAtomChiralTagsFromStructure(ll,replaceExistingTags=True);Chem.AssignStereochemistry(ll,cleanIt=True,force=True) print('Stereochemistry',[(i,ll.GetAtomWithIdx(i).GetProp('_CIPCode')) for i in [12,19]]) PY OPENBLAS_NUM_THREADS=1 python build.py > build.log 2>&1\nroot      812584  112  0.0 3142340 131428 ?      R    14:44   0:30 python build.py\nroot      816778  0.0  0.0   3228  1072 ?        S    14:45   0:00 unshare --user --map-root-user --mount --net --fork bash -c mount -t tmpfs -o size=1k none /h/400/skaxu/.agentnet_quarantine 2>/dev/null || true cd /h/400/skaxu/elagenteworkdir_png_bash_20261015/mol_0056_ce116205_gpt-6.1-sol_png_bash || exit 1 cat > build.py <<'PY' import numpy as np from rdkit import Chem from rdkit.Chem import AllChem from scipy.optimize import minimize from scipy.spatial.distance import cdist  m=Chem.MolFromMolFile('ligand_sp2.mol',removeHs=False) m.GetAtomWithIdx(0).SetHybridization(Chem.HybridizationType.SP2) p=m.GetConformer().GetPositions() # Define right-handed local ligand basis, with the donor pointing down local y. y=(p[1]+p[16])/2-p[0];y/=np.linalg.norm(y) x=p[16]-p[1];x-=np.dot(x,y)*y;x/=np.linalg.norm(x) z=np.cross(x,y) p=(p-p[0])@np.array([x,y,z]).T # Flatten NHC ring while preserving substituent geometry to numerical precision. ring=[0,1,14,15,16] print('ring plane z',p[ring,2]) p[ring,2]=0 n=len(p) syms=[a.GetSymbol() for a in m.GetAtoms()] # Metal core: Ir, Zn, methyl C, three methyl H, dihydrogen pair, # two terminal hydrides and the Ir-H-Zn bridging hydride. core=np.array([[0.,0.,0.],[2.62,0.,0.],[4.61,0.,0.],  [4.975,1.028,0.],[4.975,-.514,.8903],[4.975,-.514,-.8903],  [-1.34,-.43,1.07],[-1.34,.43,1.07],[-1.12,0.,-1.15],[1.12,0.,-1.15],[1.31,0.,1.07]]) cs=['Ir','Zn','C','H','H','H','H','H','H','H','H'] rad={'C':1.7,'N':1.55,'H':1.1,'Ir':1.4,'Zn':1.39} rl=np.array([rad[s] for s in syms]);rc=np.array([rad[s] for s in cs]) sig_ll=.88*(rl[:,None]+rl[None,:]);sig_lc=.88*(rl[:,None]+rc[None,:]) # Suppress the bonded carbene-Ir pair; constrain that site independently. sig_lc[0,0]=0 # UFF treats coordinated carbene as trigonal (sp2). ffs=[] for _ in range(2):  mi=Chem.Mol(m);mi.GetAtomWithIdx(0).SetHybridization(Chem.HybridizationType.SP2)  ff=AllChem.UFFGetMoleculeForceField(mi)  ff.UFFAddDistanceConstraint(0,1,False,1.37,1.37,5000)  ff.UFFAddDistanceConstraint(0,16,False,1.37,1.37,5000)  ff.Initialize();ffs.append((mi,ff)) free=np.array([i for i in range(n) if i not in ring])  def rep(a,b,sig):  diff=a[:,None,:]-b[None,:,:]  d2=np.sum(diff**2,axis=-1)+1.e-10  t=(sig**2/d2)**6  e=.15*t  g=-12*e[:,:,None]*diff/d2[:,:,None]  return np.sum(e),np.sum(g,axis=1),-np.sum(g,axis=0)  def initial(theta,phi):  # Top and bottom mutually opposed donor axes; rotate rings around Ir-C.  def rot(angle):   a=np.deg2rad(angle)   return np.array([[np.cos(a),0,np.sin(a)],[0,1,0],[-np.sin(a),0,np.cos(a)]])  top=p@rot(theta).T+[0,2.08,0]  bot=(p*np.array([1,-1,-1]))@rot(phi).T+[0,-2.08,0]  return np.array([top,bot])  def opt(start,maxiter):  fixed=start.copy()  def getq(v):   q=fixed.copy();q[:,free]=v.reshape(2,len(free),3);return q  def obj(v):   q=getq(v);e=0;g=np.zeros_like(q)   for k in range(2):    vq=q[k].ravel().tolist();ff=ffs[k][1]    e+=ff.CalcEnergy(vq);g[k]+=np.array(ff.CalcGrad(vq)).reshape(n,3)    ec,gc,_=rep(q[k],core,sig_lc);e+=ec;g[k]+=gc   ec,g0,g1=rep(q[0],q[1],sig_ll);e+=ec;g[0]+=g0;g[1]+=g1   return e,g[:,free].ravel()  res=minimize(obj,start[:,free].ravel(),jac=True,method='L-BFGS-B',options={'maxiter':maxiter,'ftol':1e-9,'maxls':40})  return res.fun,getq(res.x),res.success  results=[] for ang1,ang2 in [(0,90),(30,120),(60,150),(90,0),(120,30),(150,60),(0,0),(45,45)]:  e,q,ok=opt(initial(ang1,ang2),600)  print('sample',ang1,ang2,e,ok,flush=True)  results.append((e,q)) e,q=min(results,key=lambda a:a[0]);e,q,ok=opt(q,3000) coords=np.vstack([q[0],q[1],core]);symbols=syms+syms+cs with open('answer.xyz','w') as f:  f.write(f'{len(symbols)}\\n[Ir(IPr)2(H)2(eta2-H2)(mu-H)ZnMe]+; explicit H; angstrom\\n')  for s,v in zip(symbols,coords):f.write(f'{s:2s} {v[0]: .8f} {v[1]: .8f} {v[2]: .8f}\\n') print('FINAL',e,ok,'atoms',len(symbols)) np.savez('coords.npz',coords=coords,symbols=symbols) # Inspect inter-fragment closest contacts. for k in range(2):  d=cdist(q[k],core);d[0,0]=999  print('min ligand-core',np.unravel_index(np.argmin(d),d.shape),d.min()) d=cdist(q[0],q[1]);print('min ligand-ligand',np.unravel_index(np.argmin(d),d.shape),d.min()) PY OPENBLAS_NUM_THREADS=1 python build.py\nroot      816781  0.0  0.0  15832 10488 ?        D    14:45   0:00 python build.py\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_07ea612d7a195d8d84df7f7dae388016"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "if test -f answer.xyz; then head -5 answer.xyz; else echo 'Optimization still running'; fi"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 11643,
+   "output_tokens": 78,
+   "total_tokens": 11721,
+   "input_token_details": {
+    "cache_read": 4465
+   },
+   "output_token_details": {
+    "reasoning": 36
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "Optimization still running\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_1862bca86a605300b578aa1827d2fa84"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "ps -p 808197 -o pid,etime,time,state; ls answer.xyz 2>/dev/null"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 11737,
+   "output_tokens": 131,
+   "total_tokens": 11868,
+   "input_token_details": {
+    "cache_read": 11492
+   },
+   "output_token_details": {
+    "reasoning": 89
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "    PID     ELAPSED     TIME S\n 808197       01:18 00:01:14 R\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_19f5a15c86aa5bf0919da5f2b245f5fd"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "sleep 15; if test -f answer.xyz; then head -4 answer.xyz; else ps -p 808197 -o etime,time,state; fi"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 11906,
+   "output_tokens": 416,
+   "total_tokens": 12322,
+   "input_token_details": {
+    "cache_read": 11586
+   },
+   "output_token_details": {
+    "reasoning": 363
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "    ELAPSED     TIME S\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_673c1884897b5ccba292fa34b97d6e30"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "sed -i 's/range(32)/range(8)/; s/maxiter\\x27:220/maxiter\\x27:120/' build.py\nOPENBLAS_NUM_THREADS=1 python -u build.py > build.log 2>&1 & echo $!"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 12342,
+   "output_tokens": 109,
+   "total_tokens": 12451,
+   "input_token_details": {
+    "cache_read": 11755
+   },
+   "output_token_details": {
+    "reasoning": 32
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "827313\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_71618440046a5ab79c37854a35c69b55"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "sleep 4; cat build.log; ls -l answer.xyz 2>/dev/null"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 12466,
+   "output_tokens": 71,
+   "total_tokens": 12537,
+   "input_token_details": {
+    "cache_read": 12191
+   },
+   "output_token_details": {
+    "reasoning": 33
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[O-]C(c1ccccc1)/C(C)=C/C C11H13O- [(8, 10, 'STEREOE')]\nO=CN(C)C C3H7NO [(0, 1, 'STEREONONE')]\nO=CN(C)C C3H7NO [(0, 1, 'STEREONONE')]\nO=CN(C)C C3H7NO [(0, 1, 'STEREONONE')]\nrigid best 0 2.3451806841541947\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_4b040fcb88595575ad18a48b7bcba5f6"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "sleep 12; cat build.log; test -f answer.xyz && wc -l answer.xyz"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 12666,
+   "output_tokens": 103,
+   "total_tokens": 12769,
+   "input_token_details": {
+    "cache_read": 12315
+   },
+   "output_token_details": {
+    "reasoning": 64
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[O-]C(c1ccccc1)/C(C)=C/C C11H13O- [(8, 10, 'STEREOE')]\nO=CN(C)C C3H7NO [(0, 1, 'STEREONONE')]\nO=CN(C)C C3H7NO [(0, 1, 'STEREONONE')]\nO=CN(C)C C3H7NO [(0, 1, 'STEREONONE')]\nrigid best 0 2.3451806841541947\nrigid best 2 3.442366391936957e-12\nrigid best 3 6.128431095930864e-16\nrigid best 5 0.0\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_bfd0e56f36f158ee8c2f3a7d8d0bfeea"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "sleep 8; tail -10 build.log; ls -l answer.xyz 2>/dev/null"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 12942,
+   "output_tokens": 75,
+   "total_tokens": 13017,
+   "input_token_details": {
+    "cache_read": 12515
+   },
+   "output_token_details": {
+    "reasoning": 35
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "rigid best 0 2.3451806841541947\nrigid best 2 3.442366391936957e-12\nrigid best 3 6.128431095930864e-16\nrigid best 5 0.0\nflexible True CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH -27.576539955275937\nWrote answer.xyz atoms: 64\nCrOC 0 130.00000115840064\nCrOC 1 130.0000003691357\nCrOC 2 129.99999973973763\nCrOC 3 130.00000055196568\n-rw-r--r-- 1 root root 2586 Oct 15 14:46 answer.xyz\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_31db0e1d067c5432b2c244df0041c189"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python - <<'PY'\nfrom pathlib import Path\nfrom collections import Counter\nfrom rdkit import Chem\nimport numpy as np\np=Path('answer.xyz');lines=p.read_text().splitlines();n=int(lines[0]);assert len(lines)==n+2\nsymbols=[l.split()[0] for l in lines[2:]]\nxyz=np.array([[float(v) for v in l.split()[1:]] for l in lines[2:]])\nassert xyz.shape==(64,3) and np.isfinite(xyz).all()\nprint('File exists:',p.resolve())\nprint('Atom composition:',dict(Counter(symbols)))\nd=np.linalg.norm(xyz-xyz[0],axis=1)\nprint('Six closest chromium neighbors:', [(symbols[i],round(d[i],3)) for i in np.argsort(d)[1:7]])\nm=Chem.AddHs(Chem.MolFromSmiles('[O-]C(c1ccccc1)/C(C)=C/C'))\nc=Chem.Conformer(m.GetNumAtoms())\nfor i in range(m.GetNumAtoms()):c.SetAtomPosition(i,xyz[i+3])\nm.AddConformer(c)\nChem.AssignStereochemistryFrom3D(m)\nprint('Alkene stereochemistry:',[str(b.GetStereo()) for b in m.GetBonds() if b.GetBondType()==Chem.BondType.DOUBLE])\nPY"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 13203,
+   "output_tokens": 404,
+   "total_tokens": 13607,
+   "input_token_details": {
+    "cache_read": 12791
+   },
+   "output_token_details": {
+    "reasoning": 78
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "File exists: /h/400/skaxu/elagenteworkdir_png_bash_20261015/mol_0054_ce116205_gpt-6.1-sol_png_bash/answer.xyz\nAtom composition: {'Cr': 1, 'Cl': 2, 'O': 4, 'C': 20, 'H': 34, 'N': 3}\nSix closest chromium neighbors: [('O', np.float64(1.88)), ('O', np.float64(2.04)), ('O', np.float64(2.04)), ('O', np.float64(2.04)), ('Cl', np.float64(2.31)), ('Cl', np.float64(2.31))]\nAlkene stereochemistry: ['STEREOE']\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_2916350106ae519ca20f941341e20c65"
+ },
+ {
+  "type": "AIMessage",
+  "content": "Created `answer.xyz` in the working directory with the 3D structure and all hydrogens included (64 atoms). Confirmed that the file exists.",
+  "usage": {
+   "input_tokens": 13783,
+   "output_tokens": 36,
+   "total_tokens": 13819,
+   "input_token_details": {
+    "cache_read": 13052
+   },
+   "output_token_details": {
+    "reasoning": 0
+   }
+  }
+ }
+]

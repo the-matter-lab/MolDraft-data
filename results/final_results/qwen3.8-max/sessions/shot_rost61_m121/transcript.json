@@ -1,0 +1,667 @@
+[
+ {
+  "type": "SystemMessage",
+  "content": "You are a helpful chemistry assistant. You build 3D molecular\n  structures from the chemical information you are given, including 2D drawings\n  supplied as images.\n\n  When you are given a 2D drawing of a molecule, your task is to produce the 3D\n  structure that drawing depicts and save it as `answer.xyz` in your working\n  directory.\n\n  Requirements for `answer.xyz`:\n  - Include all explicit hydrogens.\n  - Use a right-handed Cartesian coordinate system, units of angstroms.\n  - Standard XYZ format: first line is the total atom count, second line a\n    one-line comment, each remaining line `Element X Y Z`.\n\n  When you are done, confirm that `answer.xyz` exists in the working directory.\n  \n\n[IMPORTANT CONSTRAINT] You must NOT call multiple tools in parallel. Execute tools ONE AT A TIME, sequentially. Wait for each tool's result before calling the next tool. Never batch multiple tool calls in a single response."
+ },
+ {
+  "type": "HumanMessage",
+  "content": "A 2D structure of a molecule is provided as a PNG file in your working directory: mol_0099.png\n\nBuild the 3D structure it depicts and save it as answer.xyz.\n"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "ls -la; pwd"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 1781,
+   "output_tokens": 46,
+   "total_tokens": 1827,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 1024
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 13
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "total 126\ndrwxr-xr-x   2 root root     3 Oct  6 04:04 .\ndrwxr-xr-x 101 root root   101 Oct  6 04:04 ..\n-rw-r--r--   1 root root 41638 Oct  6 04:04 mol_0099.png\n/h/400/skaxu/elagenteworkdir/mol_0099_004abd60_qwen3.8-max\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_c15e65c03b1a461ab04489a8"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "view_png_file",
+    "args": {
+     "png_file_relative_path": "mol_0099.png"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 1957,
+   "output_tokens": 66,
+   "total_tokens": 2023,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 1024
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 28
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[image]",
+  "name": "view_png_file",
+  "tool_call_id": "call_0c77f87482614914ba5094ba"
+ },
+ {
+  "type": "AIMessage",
+  "content": "Looking at the PNG: this is an *ansa*-bridged titanocene(III) methyl complex \u2014 Ti (S = 1/2, d\u00b9) is sandwiched between two \u03b7\u2075-tetramethylcyclopentadienyl rings, whose ipso carbons each bear a SiMe\u2082 unit, and the two Si atoms are linked by an ethylene (\u2013CH\u2082\u2013CH\u2082\u2013) bridge. Additionally, there is a Ti\u2013Me ligand.\n\nI'll programmatically construct a reasonable 3D initial guess, and then optimize it with xTB (uhf=1 for S=1/2).\n\n",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > build.py << 'EOF'\nimport numpy as np\n\ndef unit(v):\n    v = np.array(v, float)\n    return v / np.linalg.norm(v)\n\natoms = []  # (element, xyz)\n\nt = np.radians(6.0)          # half of (180 - centroid-Ti-centroid)\nRcc = 1.42\nRring = Rcc / (2*np.sin(np.pi/5))\ndTiCp = 2.05\n\nd1 = np.array([-np.sin(t), 0,  np.cos(t)])   # centroid dir ring1 (top)\nd2 = np.array([-np.sin(t), 0, -np.cos(t)])   # ring2 (bottom)\nc1 = d1*dTiCp\nc2 = d2*dTiCp\nu1 = np.array([-np.cos(t), 0, -np.sin(t)])   # in-plane, toward ipso (bridge side)\nu2 = np.array([-np.cos(t), 0,  np.sin(t)])\nv  = np.array([0,1,0])\n\nringC = {1: [], 2: []}\nringMe = {1: [], 2: []}\nfor i,(c,u) in enumerate([(c1,u1),(c2,u2)], start=1):\n    for k in range(5):\n        phi = np.radians(72*k)\n        rad = np.cos(phi)*u + np.sin(phi)*v\n        C = c + Rring*rad\n        ringC[i].append(C)\n        if k != 0:\n            ringMe[i].append(C + 1.51*rad)\n\nipso1, ipso2 = ringC[1][0], ringC[2][0]\nSi1 = ipso1 + 1.87*u1\nSi2 = ipso2 + 1.87*u2\n\n# bridge CH2-CH2 in xz plane, symmetric under z -> -z\nD = np.linalg.norm(Si1-Si2)\npz = 0.77\nsx, sz = Si1[0], Si1[2]\npx = sx - np.sqrt(1.87**2 - (sz-pz)**2)   # bulge outward (-x)\nCa = np.array([px, 0,  pz])\nCb = np.array([px, 0, -pz])\n\ndef two_more(d1v, d2v):\n    d1v, d2v = unit(d1v), unit(d2v)\n    m = unit(d1v+d2v)\n    n = unit(np.cross(d1v,d2v))\n    cb = np.dot(d1v, m)\n    a = 1.0/(3*cb)\n    b = np.sqrt(max(1-a*a, 0.0))\n    return unit(-a*m + b*n), unit(-a*m - b*n)\n\ndef three_more(d):\n    d = unit(d)\n    p = np.array([1,0,0]) if abs(d[0])<0.9 else np.array([0,1,0])\n    p = unit(p - np.dot(p,d)*d)\n    q = unit(np.cross(d,p))\n    out = []\n    for phi in (0, 120, 240):\n        e = -d/3.0 + (np.sqrt(8)/3)*(np.cos(np.radians(phi))*p + np.sin(np.radians(phi))*q)\n        out.append(unit(e))\n    return out\n\n# Si methyls\ne1, e2 = two_more(ipso1-Si1, Ca-Si1)\nSiMe1 = [Si1 + 1.86*e1, Si1 + 1.86*e2]\ne1, e2 = two_more(ipso2-Si2, Cb-Si2)\nSiMe2 = [Si2 + 1.86*e1, Si2 + 1.86*e2]\n\n# Ti methyl: opposite centroid bisector\nw = unit(-(d1+d2))\nTiMe = w*2.10\n\n# collect heavy atoms\natoms.append(('Ti', np.zeros(3)))\nfor i in (1,2):\n    for C in ringC[i]: atoms.append(('C', C))\n    for C in ringMe[i]: atoms.append(('C', C))\nfor S in (Si1, Si2): atoms.append(('Si', S))\nfor C in SiMe1+SiMe2: atoms.append(('C', C))\natoms.append(('C', Ca)); atoms.append(('C', Cb))\natoms.append(('C', TiMe))\n\n# hydrogens\nH = []\nfor i in (1,2):\n    for k in range(1,5):\n        Me = ringMe[i][k-1]; parent = ringC[i][k]\n        for e in three_more(parent-Me):\n            H.append(Me + 1.09*e)\nfor Si, Mes, other in [(Si1, SiMe1, ipso1), (Si2, SiMe2, ipso2)]:\n    pass\n# Si methyl Hs\nfor Me, parent in [(SiMe1[0],Si1),(SiMe1[1],Si1),(SiMe2[0],Si2),(SiMe2[1],Si2)]:\n    for e in three_more(parent-Me):\n        H.append(Me + 1.09*e)\n# chain CH2 Hs\ne1, e2 = two_more(Si1-Ca, Cb-Ca)\nH.append(Ca + 1.09*e1); H.append(Ca + 1.09*e2)\ne1, e2 = two_more(Si2-Cb, Ca-Cb)\nH.append(Cb + 1.09*e1); H.append(Cb + 1.09*e2)\n# Ti-Me Hs\nfor e in three_more(np.zeros(3)-TiMe):\n    H.append(TiMe + 1.09*e)\n\nfor h in H: atoms.append(('H', h))\n\nwith open('guess.xyz','w') as f:\n    f.write(f\"{len(atoms)}\\ninitial guess ansa-Ti(III) methyl complex\\n\")\n    for el, xyz in atoms:\n        f.write(f\"{el} {xyz[0]:.6f} {xyz[1]:.6f} {xyz[2]:.6f}\\n\")\nprint(\"atoms:\", len(atoms))\nfrom collections import Counter\nprint(Counter([a[0] for a in atoms]))\nprint(\"Si1-Si2 dist\", D)\nEOF\npython3 build.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 2427,
+   "output_tokens": 11294,
+   "total_tokens": 13721,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 2304
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 9618
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "atoms: 71\nCounter({'H': 43, 'C': 25, 'Si': 2, 'Ti': 1})\nSi1-Si2 dist 3.4340784085495257\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_514151c88a7c45c4bb0b16a0"
+ },
+ {
+  "type": "AIMessage",
+  "content": "The atom count matches C\u2082\u2085H\u2084\u2083Si\u2082Ti (71 atoms). Let me visually check the initial geometry.\n\n",
+  "tool_calls": [
+   {
+    "name": "view_molecule",
+    "args": {
+     "xyz_file_relative_path": "guess.xyz",
+     "left_right_deg": 0,
+     "up_down_deg": 0
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 4176,
+   "output_tokens": 133,
+   "total_tokens": 4309,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 2304
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 41
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[image]",
+  "name": "view_molecule",
+  "tool_call_id": "call_564877f23fae4996814188d0"
+ },
+ {
+  "type": "AIMessage",
+  "content": "The connectivity looks right. Let me check from another angle to confirm the sandwich arrangement.\n\n",
+  "tool_calls": [
+   {
+    "name": "view_molecule",
+    "args": {
+     "left_right_deg": 90,
+     "up_down_deg": 0,
+     "xyz_file_relative_path": "guess.xyz"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 5278,
+   "output_tokens": 144,
+   "total_tokens": 5422,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 4096
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 63
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[image]",
+  "name": "view_molecule",
+  "tool_call_id": "call_01f3e4aabd9c496abd6cc5d2"
+ },
+ {
+  "type": "AIMessage",
+  "content": "The edge-on view confirms the ansa-bridged sandwich arrangement. Now optimize with xTB (GFN2, doublet state, uhf=1).\n\n",
+  "tool_calls": [
+   {
+    "name": "constraint_xtb",
+    "args": {
+     "input_xyz": "guess.xyz",
+     "output_xyz": "answer.xyz",
+     "gfn_method": "gfn2",
+     "uhf": 1,
+     "charge": 0,
+     "ncores": 4
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 6369,
+   "output_tokens": 183,
+   "total_tokens": 6552,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 5120
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 53
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "{\"return_code\": 1, \"output_xyz\": null, \"log_path\": \"/h/400/skaxu/elagenteworkdir/mol_0099_004abd60_qwen3.8-max/answer.log\", \"error_msg\": \"abnormal termination of xtb\\nERROR STOP \\n\\nError termination. Backtrace:\\n#0  0x55d480904926 in ???\\n#1  0x55d480837154 in ???\\n#2  0x55d48081f272 in ???\\n#3  0x7f56e5e48d8f in __libc_start_call_main\\n\\tat ../sysdeps/nptl/libc_start_call_main.h:58\\n#4  0x7f56e5e48e3f in __libc_start_main_impl\\n\\tat ../csu/libc-start.c:392\\n#5  0x55d48081f316 in ???\\n#6  0xffffffffffffffff in ???\\n\"}",
+  "name": "constraint_xtb",
+  "tool_call_id": "call_0b0e54c7a95e45f58dbf4f5a"
+ },
+ {
+  "type": "AIMessage",
+  "content": "xTB terminated abnormally. Let me inspect the log.\n\n",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "tail -40 answer.log; echo ---; ls"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 6774,
+   "output_tokens": 69,
+   "total_tokens": 6843,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 6144
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 16
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "   F. Musil, H. Neugebauer, J. Pisarek, C. Plett, P. Pracht, F. Pultar,\n   J. Seibert, P. Shushkov, S. Spicher, M. Stahn, M. Steiner, T. Strunk,\n   J. St\u00fcckrath, T. Rose, and J. Unsleber\n   \n * started run on 2026/10/06 at 04:14:13.632     \n   ID    Z sym.   atoms\n    1   22 Ti     1\n    2    6 C      2-19, 22-28\n    3   14 Si     20, 21\n    4    1 H      29-71\n\n           -------------------------------------------------\n          |                Calculation Setup                |\n           -------------------------------------------------\n\n          program call               : /h/400/skaxu/miniforge3/envs/elagente_env/bin/xtb guess.xyz --opt --gfn 2 -P 4 --chrg 0 --uhf 1\n          hostname                   : bosque5\n          coordinate file            : guess.xyz\n          omp threads                :                     4\n\n\nmolecular fragmentation (1/2 indicates fragments):\n11111111111111111111111111121111111111111111111111111111111111111111222\n# atoms in fragment 1/2:    67     4\n fragment masses (1/2) :      432.61       15.03\nCMA distance (Bohr)    :   6.400\nconstraining FC (au)   :  0.0500\n########################################################################\n[ERROR] Program stopped due to fatal error\n-10- Some atoms in the start geometry are *very* close\n-9- XTB REFUSES TO CONTINUE WITH THIS CALCULATION!\n-8- Found *very* short distance of  0.000E+00 for H61-H64\n-7- Found *very* short distance of  0.000E+00 for H60-H63\n-6- Found *very* short distance of  0.000E+00 for H59-H62\n-5- Found *very* short distance of  0.000E+00 for H55-H58\n-4- Found *very* short distance of  0.000E+00 for H54-H57\n-3- Found *very* short distance of  0.000E+00 for H53-H56\n-2- Found *very* short distance of  0.000E+00 for C24-C25\n-1- Found *very* short distance of  0.000E+00 for C22-C23\n########################################################################\n---\nanswer.log\nbuild.py\nguess.xyz\nmol_0099.png\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_ac584f72fa6047c9a22977b5"
+ },
+ {
+  "type": "AIMessage",
+  "content": "The initial geometry had degenerate Si methyl positions (the ipso\u2013Si\u2013CH\u2082 angle was about 141\u00b0, so the tetrahedral completion collapsed). I'll reconstruct the bridge by properly solving for the CH\u2082 positions so that all Si angles become tetrahedral.\n\n",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > build2.py << 'EOF'\nimport numpy as np\nfrom scipy.optimize import fsolve\n\ndef unit(v):\n    v = np.array(v, float)\n    return v / np.linalg.norm(v)\n\nt = np.radians(6.0)\nRcc = 1.42\nRring = Rcc / (2*np.sin(np.pi/5))\ndTiCp = 2.05\n\nd1 = np.array([-np.sin(t), 0,  np.cos(t)])\nd2 = np.array([-np.sin(t), 0, -np.cos(t)])\nc1 = d1*dTiCp\nc2 = d2*dTiCp\nu1 = np.array([-np.cos(t), 0, -np.sin(t)])\nu2 = np.array([-np.cos(t), 0,  np.sin(t)])\nv  = np.array([0,1,0])\n\nringC = {1: [], 2: []}\nringMe = {1: [], 2: []}\nfor i,(c,u) in enumerate([(c1,u1),(c2,u2)], start=1):\n    for k in range(5):\n        phi = np.radians(72*k)\n        rad = np.cos(phi)*u + np.sin(phi)*v\n        C = c + Rring*rad\n        ringC[i].append(C)\n        if k != 0:\n            ringMe[i].append(C + 1.51*rad)\n\nipso1, ipso2 = ringC[1][0], ringC[2][0]\nSi1 = ipso1 + 1.87*u1\nSi2 = ipso2 + 1.87*u2\n\nc109 = np.cos(np.radians(109.5))\ndef eqs(p):\n    x, z = p\n    Ca = np.array([x, 0.0, z])\n    Cb = np.array([x, 0.0, -z])\n    f1 = np.dot(unit(ipso1-Si1), unit(Ca-Si1)) - c109\n    f2 = np.dot(unit(Si1-Ca), unit(Cb-Ca)) - c109\n    return [f1, f2]\n\nsol, info, ier, msg = fsolve(eqs, [-2.6, 0.9], full_output=True)\nassert ier == 1, msg\npx, pz = sol\nCa = np.array([px, 0.0, pz])\nCb = np.array([px, 0.0, -pz])\nprint(\"Ca:\", Ca, \" Si1-Ca dist\", np.linalg.norm(Si1-Ca))\nprint(\"angle ipso1-Si1-Ca:\", np.degrees(np.arccos(np.dot(unit(ipso1-Si1), unit(Ca-Si1)))))\nprint(\"angle Si1-Ca-Cb:\", np.degrees(np.arccos(np.dot(unit(Si1-Ca), unit(Cb-Ca)))))\n# mirror check: Si2 should equal mirror of Si1\nprint(\"Si2 vs mirror Si1:\", Si2, np.array([Si1[0], Si1[1], -Si1[2]]))\n\ndef two_more(d1v, d2v):\n    d1v, d2v = unit(d1v), unit(d2v)\n    m = unit(d1v+d2v)\n    n = unit(np.cross(d1v,d2v))\n    cb = np.dot(d1v, m)\n    a = 1.0/(3*cb)\n    b = np.sqrt(max(1-a*a, 1e-9))\n    return unit(-a*m + b*n), unit(-a*m - b*n)\n\ndef three_more(d):\n    d = unit(d)\n    p = np.array([1,0,0]) if abs(d[0])<0.9 else np.array([0,1,0])\n    p = unit(p - np.dot(p,d)*d)\n    q = unit(np.cross(d,p))\n    out = []\n    for phi in (0, 120, 240):\n        e = -d/3.0 + (np.sqrt(8)/3)*(np.cos(np.radians(phi))*p + np.sin(np.radians(phi))*q)\n        out.append(unit(e))\n    return out\n\natoms = [('Ti', np.zeros(3))]\nfor i in (1,2):\n    for C in ringC[i]: atoms.append(('C', C))\n    for C in ringMe[i]: atoms.append(('C', C))\natoms += [('Si', Si1), ('Si', Si2)]\ne1, e2 = two_more(ipso1-Si1, Ca-Si1)\nSiMe1 = [Si1 + 1.86*e1, Si1 + 1.86*e2]\ne1, e2 = two_more(ipso2-Si2, Cb-Si2)\nSiMe2 = [Si2 + 1.86*e1, Si2 + 1.86*e2]\nfor C in SiMe1+SiMe2: atoms.append(('C', C))\nw = unit(-(d1+d2))\nTiMe = w*2.10\natoms += [('C', Ca), ('C', Cb), ('C', TiMe)]\n\nH = []\nfor i in (1,2):\n    for k in range(1,5):\n        Me = ringMe[i][k-1]; parent = ringC[i][k]\n        for e in three_more(parent-Me):\n            H.append(Me + 1.09*e)\nfor Me, parent in [(SiMe1[0],Si1),(SiMe1[1],Si1),(SiMe2[0],Si2),(SiMe2[1],Si2)]:\n    for e in three_more(parent-Me):\n        H.append(Me + 1.09*e)\ne1, e2 = two_more(Si1-Ca, Cb-Ca)\nH.append(Ca + 1.09*e1); H.append(Ca + 1.09*e2)\ne1, e2 = two_more(Si2-Cb, Ca-Cb)\nH.append(Cb + 1.09*e1); H.append(Cb + 1.09*e2)\nfor e in three_more(-TiMe):\n    H.append(TiMe + 1.09*e)\nfor h in H: atoms.append(('H', h))\n\n# sanity: min pairwise distance\nP = np.array([a[1] for a in atoms])\nD = np.linalg.norm(P[:,None,:]-P[None,:,:], axis=-1)\nnp.fill_diagonal(D, 1e9)\nprint(\"min pair dist:\", D.min())\n\nwith open('guess.xyz','w') as f:\n    f.write(f\"{len(atoms)}\\ninitial guess ansa-Ti(III) methyl complex\\n\")\n    for el, xyz in atoms:\n        f.write(f\"{el} {xyz[0]:.6f} {xyz[1]:.6f} {xyz[2]:.6f}\\n\")\nprint(\"atoms:\", len(atoms))\nEOF\npython3 build2.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 7578,
+   "output_tokens": 4953,
+   "total_tokens": 12531,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 6144
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 3226
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "Traceback (most recent call last):\n  File \"/h/400/skaxu/elagenteworkdir/mol_0099_004abd60_qwen3.8-max/build2.py\", line 46, in <module>\n    assert ier == 1, msg\n           ^^^^^^^^\nAssertionError: The iteration is not making good progress, as measured by the \n improvement from the last ten iterations.\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_2f7072e3a5954dfd8da00bd8"
+ },
+ {
+  "type": "AIMessage",
+  "content": "The planar bridge forced an impossible Si angle (155\u00b0). The actual ansa-bridge is non-planar. Use C\u2082 symmetry (axis = x) and scan for CH\u2082 positions that give near-tetrahedral angles at both Si and C.\n\n",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > build3.py << 'EOF'\nimport numpy as np\n\ndef unit(v):\n    v = np.array(v, float); return v/np.linalg.norm(v)\n\nt = np.radians(6.0)\nRcc = 1.42; Rring = Rcc/(2*np.sin(np.pi/5)); dTiCp = 2.05\nd1 = np.array([-np.sin(t),0, np.cos(t)]); d2 = np.array([-np.sin(t),0,-np.cos(t)])\nc1 = d1*dTiCp; c2 = d2*dTiCp\nu1 = np.array([-np.cos(t),0,-np.sin(t)]); u2 = np.array([-np.cos(t),0, np.sin(t)])\nv  = np.array([0,1,0])\nringC={1:[],2:[]}; ringMe={1:[],2:[]}\nfor i,(c,u) in enumerate([(c1,u1),(c2,u2)],1):\n    for k in range(5):\n        phi=np.radians(72*k); rad=np.cos(phi)*u+np.sin(phi)*v; C=c+Rring*rad\n        ringC[i].append(C)\n        if k!=0: ringMe[i].append(C+1.51*rad)\nipso1, ipso2 = ringC[1][0], ringC[2][0]\nSi1 = ipso1+1.87*u1; Si2 = ipso2+1.87*u2\nprint(\"Si1\",Si1,\"Si2\",Si2)\n\nc109 = np.cos(np.radians(109.5))\nbest=None\nfor chi in np.linspace(0, 2*np.pi, 721):\n    py, pz = 0.77*np.sin(chi), 0.77*np.cos(chi)\n    # solve px: (px-Si1x)^2 + (py-Si1y)^2 + (pz-Si1z)^2 = 1.87^2\n    rem = 1.87**2 - (py-Si1[1])**2 - (pz-Si1[2])**2\n    if rem < 0: continue\n    for sgn in (-1,):\n        px = Si1[0] + sgn*np.sqrt(rem)\n        Ca = np.array([px,py,pz]); Cb = np.array([px,-py,-pz])\n        aSi = np.degrees(np.arccos(np.clip(np.dot(unit(ipso1-Si1),unit(Ca-Si1)),-1,1)))\n        aC  = np.degrees(np.arccos(np.clip(np.dot(unit(Si1-Ca),unit(Cb-Ca)),-1,1)))\n        score = (aSi-109.5)**2 + (aC-109.5)**2\n        if best is None or score < best[0]:\n            best = (score, chi, px, py, pz, aSi, aC)\nscore, chi, px, py, pz, aSi, aC = best\nCa = np.array([px,py,pz]); Cb = np.array([px,-py,-pz])\nprint(\"chi(deg)=%.1f Ca=%s aSi=%.1f aC=%.1f score=%.1f\"%(np.degrees(chi),Ca,aSi,aC,score))\nprint(\"Si1-Ca\",np.linalg.norm(Si1-Ca),\"Ca-Cb\",np.linalg.norm(Ca-Cb))\n\ndef two_more(d1v,d2v):\n    d1v,d2v=unit(d1v),unit(d2v); m=unit(d1v+d2v); n=unit(np.cross(d1v,d2v))\n    cb=np.dot(d1v,m); a=1.0/(3*cb); b=np.sqrt(max(1-a*a,1e-9))\n    return unit(-a*m+b*n), unit(-a*m-b*n)\ndef three_more(d):\n    d=unit(d)\n    p=np.array([1,0,0]) if abs(d[0])<0.9 else np.array([0,1,0])\n    p=unit(p-np.dot(p,d)*d); q=unit(np.cross(d,p)); out=[]\n    for phi in (0,120,240):\n        e=-d/3.0+(np.sqrt(8)/3)*(np.cos(np.radians(phi))*p+np.sin(np.radians(phi))*q)\n        out.append(unit(e))\n    return out\n\natoms=[('Ti',np.zeros(3))]\nfor i in (1,2):\n    for C in ringC[i]: atoms.append(('C',C))\n    for C in ringMe[i]: atoms.append(('C',C))\natoms += [('Si',Si1),('Si',Si2)]\ne1,e2 = two_more(ipso1-Si1, Ca-Si1); SiMe1=[Si1+1.86*e1, Si1+1.86*e2]\ne1,e2 = two_more(ipso2-Si2, Cb-Si2); SiMe2=[Si2+1.86*e1, Si2+1.86*e2]\nfor C in SiMe1+SiMe2: atoms.append(('C',C))\nw = unit(-(d1+d2)); TiMe = w*2.10\natoms += [('C',Ca),('C',Cb),('C',TiMe)]\nH=[]\nfor i in (1,2):\n    for k in range(1,5):\n        Me=ringMe[i][k-1]; parent=ringC[i][k]\n        for e in three_more(parent-Me): H.append(Me+1.09*e)\nfor Me,parent in [(SiMe1[0],Si1),(SiMe1[1],Si1),(SiMe2[0],Si2),(SiMe2[1],Si2)]:\n    for e in three_more(parent-Me): H.append(Me+1.09*e)\ne1,e2 = two_more(Si1-Ca, Cb-Ca); H.append(Ca+1.09*e1); H.append(Ca+1.09*e2)\ne1,e2 = two_more(Si2-Cb, Ca-Cb); H.append(Cb+1.09*e1); H.append(Cb+1.09*e2)\nfor e in three_more(-TiMe): H.append(TiMe+1.09*e)\nfor h in H: atoms.append(('H',h))\n\nP=np.array([a[1] for a in atoms])\nD=np.linalg.norm(P[:,None,:]-P[None,:,:],axis=-1); np.fill_diagonal(D,1e9)\nprint(\"min pair dist:\",D.min())\nwith open('guess.xyz','w') as f:\n    f.write(f\"{len(atoms)}\\ninitial guess ansa-Ti(III) methyl complex\\n\")\n    for el,xyz in atoms: f.write(f\"{el} {xyz[0]:.6f} {xyz[1]:.6f} {xyz[2]:.6f}\\n\")\nprint(\"atoms:\",len(atoms))\nEOF\npython3 build3.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 9416,
+   "output_tokens": 8967,
+   "total_tokens": 18383,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 7168
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 7238
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "Si1 [-3.27534631  0.          1.7170392 ] Si2 [-3.27534631  0.         -1.7170392 ]\nchi(deg)=297.5 Ca=[-4.36012771 -0.68299834  0.35554643] aSi=130.8 aC=90.7 score=805.9\nSi1-Ca 1.8700000000000003 Ca-Cb 1.54\nmin pair dist: 1.0566364317584807\natoms: 71\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_9475a66d567a447aac459037"
+ },
+ {
+  "type": "AIMessage",
+  "content": "The bridge geometry needs a proper ring-tilt (bent metallocene, centroid\u2013Ti\u2013centroid ~130\u00b0). Let me solve the bridge/ring-tilt consistently.\n\n",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > build4.py << 'EOF'\nimport numpy as np\n\ndef unit(v):\n    v=np.array(v,float); return v/np.linalg.norm(v)\n\nRcc=1.42; Rring=Rcc/(2*np.sin(np.pi/5)); dTiCp=2.05\nv=np.array([0,1,0])\nc109=np.cos(np.radians(109.5)); s109=np.sin(np.radians(109.5))\n\ndef rings(t):\n    d1=np.array([-np.sin(t),0, np.cos(t)]); d2=np.array([-np.sin(t),0,-np.cos(t)])\n    c1=d1*dTiCp; c2=d2*dTiCp\n    u1=np.array([-np.cos(t),0,-np.sin(t)]); u2=np.array([-np.cos(t),0, np.sin(t)])\n    rc={1:[],2:[]}; rm={1:[],2:[]}\n    for i,(c,u) in enumerate([(c1,u1),(c2,u2)],1):\n        for k in range(5):\n            phi=np.radians(72*k); rad=np.cos(phi)*u+np.sin(phi)*v; C=c+Rring*rad\n            rc[i].append(C)\n            if k!=0: rm[i].append(C+1.51*rad)\n    return rc,rm\n\nresults=[]\nfor tdeg in np.arange(8,40,0.25):\n    t=np.radians(tdeg)\n    rc,rm=rings(t)\n    ipso1=rc[1][0]; ipso2=rc[2][0]\n    Si1=ipso1+1.87*unit(ipso1- (ipso1+ (ipso1-ipso1)))  # placeholder\n    Si1=ipso1+1.87*unit(np.array([-np.cos(t),0,-np.sin(t)]))\n    Si2=np.array([Si1[0],Si1[1],-Si1[2]])\n    a=unit(ipso1-Si1)\n    p=np.array([0,1,0]); p=unit(p-np.dot(p,a)*a); q=unit(np.cross(a,p))\n    psis=np.linspace(0,2*np.pi,1441)\n    Cas=[]\n    for psi in psis:\n        e=c109*a+s109*(np.cos(psi)*p+np.sin(psi)*q)\n        Ca=Si1+1.87*e\n        Cb=np.array([Ca[0],-Ca[1],-Ca[2]])\n        Cas.append((np.linalg.norm(Ca-Cb),Ca))\n    darr=np.array([d for d,_ in Cas])\n    # find crossings of 1.54\n    diff=darr-1.54\n    roots=[]\n    for i in range(len(diff)-1):\n        if diff[i]==0 or diff[i]*diff[i+1]<0:\n            f=diff[i]/(diff[i]-diff[i+1])\n            Ca=Cas[i][1]*(1-f)+Cas[i+1][1]*f\n            roots.append(Ca)\n    for Ca in roots:\n        Cb=np.array([Ca[0],-Ca[1],-Ca[2]])\n        aCa=np.degrees(np.arccos(np.clip(np.dot(unit(Si1-Ca),unit(Cb-Ca)),-1,1)))\n        aSi=np.degrees(np.arccos(np.clip(np.dot(unit(ipso1-Si1),unit(Ca-Si1)),-1,1)))\n        results.append((abs(aCa-109.5),tdeg,Ca,aCa,aSi))\n\nresults.sort(key=lambda r:r[0])\nfor r in results[:6]:\n    print(\"score=%.2f tilt_half=%.2f Ca=%s aCa=%.1f aSi=%.1f\"%(r[0],r[1],np.round(r[2],3),r[3],r[4]))\nEOF\npython3 build4.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 11347,
+   "output_tokens": 5316,
+   "total_tokens": 16663,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 9216
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 4329
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "score=47.83 tilt_half=8.00 Ca=[-3.731 -0.768 -0.056] aCa=61.7 aSi=109.5\nscore=47.83 tilt_half=8.00 Ca=[-3.731  0.768 -0.056] aCa=61.7 aSi=109.5\nscore=49.02 tilt_half=8.25 Ca=[-3.73  -0.766 -0.073] aCa=60.5 aSi=109.5\nscore=49.02 tilt_half=8.25 Ca=[-3.73   0.766 -0.073] aCa=60.5 aSi=109.5\nscore=50.21 tilt_half=8.50 Ca=[-3.73  -0.765 -0.091] aCa=59.3 aSi=109.5\nscore=50.21 tilt_half=8.50 Ca=[-3.73   0.765 -0.091] aCa=59.3 aSi=109.5\n/h/400/skaxu/elagenteworkdir/mol_0099_004abd60_qwen3.8-max/build4.py:4: RuntimeWarning: invalid value encountered in divide\n  v=np.array(v,float); return v/np.linalg.norm(v)\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_004ccf9255c44a6e81413948"
+ },
+ {
+  "type": "AIMessage",
+  "content": "The bridge needs ring-tilt and bent exocyclic C\u2013Si bonds. Let me scan tilt and bend to get a consistent, unstrained bridge.\n\n",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > build5.py << 'EOF'\nimport numpy as np\n\ndef unit(v):\n    v=np.array(v,float); return v/np.linalg.norm(v)\n\nRcc=1.42; Rring=Rcc/(2*np.sin(np.pi/5)); dTiCp=2.05\nv=np.array([0,1,0])\nc109=np.cos(np.radians(109.5)); s109=np.sin(np.radians(109.5))\n\ndef rings(t):\n    d1=np.array([-np.sin(t),0, np.cos(t)]); d2=np.array([-np.sin(t),0,-np.cos(t)])\n    c1=d1*dTiCp; c2=d2*dTiCp\n    u1=np.array([-np.cos(t),0,-np.sin(t)]); u2=np.array([-np.cos(t),0, np.sin(t)])\n    rc={1:[],2:[]}; rm={1:[],2:[]}\n    for i,(c,u) in enumerate([(c1,u1),(c2,u2)],1):\n        for k in range(5):\n            phi=np.radians(72*k); rad=np.cos(phi)*u+np.sin(phi)*v; C=c+Rring*rad\n            rc[i].append(C)\n            if k!=0: rm[i].append(C+1.51*rad)\n    return rc,rm,d1,d2,u1,u2\n\ndef rot_y(e, beta):\n    c,s=np.cos(beta),np.sin(beta)\n    return np.array([c*e[0]+s*e[2], e[1], -s*e[0]+c*e[2]])\n\nbest=None\nfor tdeg in np.arange(-6,30.01,0.5):\n    t=np.radians(tdeg)\n    rc,rm,d1,d2,u1,u2=rings(t)\n    ipso1=rc[1][0]\n    for bdeg in np.arange(0,30.01,1.0):\n        beta=np.radians(bdeg)\n        e_si=rot_y(u1,beta)   # bend toward -z (bridge side)\n        Si1=ipso1+1.87*e_si\n        a=unit(ipso1-Si1)\n        p=np.array([0,1,0]); p=unit(p-np.dot(p,a)*a); q=unit(np.cross(a,p))\n        psis=np.linspace(0,2*np.pi,2881)\n        pts=[]\n        for psi in psis:\n            e=c109*a+s109*(np.cos(psi)*p+np.sin(psi)*q)\n            Ca=Si1+1.87*e\n            Cb=np.array([Ca[0],-Ca[1],-Ca[2]])\n            pts.append((np.linalg.norm(Ca-Cb),Ca))\n        darr=np.array([d for d,_ in pts]); diff=darr-1.54\n        for i in range(len(diff)-1):\n            if diff[i]*diff[i+1]<0:\n                f=diff[i]/(diff[i]-diff[i+1])\n                Ca=pts[i][1]*(1-f)+pts[i+1][1]*f\n                Cb=np.array([Ca[0],-Ca[1],-Ca[2]])\n                aCa=np.degrees(np.arccos(np.clip(np.dot(unit(Si1-Ca),unit(Cb-Ca)),-1,1)))\n                dev=abs(aCa-109.5)\n                if best is None or dev<best[0]:\n                    best=(dev,tdeg,bdeg,Ca.copy(),aCa,Si1.copy())\ndev,tdeg,bdeg,Ca,aCa,Si1=best\nprint(\"best dev=%.2f tilt=%.1f bend=%.1f Ca=%s aCa=%.1f Si1=%s\"%(dev,tdeg,bdeg,np.round(Ca,3),aCa,np.round(Si1,3)))\nnp.save('bridge.npy', np.array([tdeg,bdeg,Ca[0],Ca[1],Ca[2]]))\nEOF\npython3 build5.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 12717,
+   "output_tokens": 5872,
+   "total_tokens": 18589,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 11264
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 4878
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[TIMEOUT]",
+  "name": "bash_kernel",
+  "tool_call_id": "call_056a1b8f43fe4b6e87335710"
+ },
+ {
+  "type": "AIMessage",
+  "content": "Scan was too slow. Let me vectorize it.\n\n",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > build5.py << 'EOF'\nimport numpy as np\n\ndef unit(v):\n    v=np.array(v,float); return v/np.linalg.norm(v)\n\nRcc=1.42; Rring=Rcc/(2*np.sin(np.pi/5)); dTiCp=2.05\nv=np.array([0,1,0])\nc109=np.cos(np.radians(109.5)); s109=np.sin(np.radians(109.5))\n\ndef rings(t):\n    d1=np.array([-np.sin(t),0, np.cos(t)]); d2=np.array([-np.sin(t),0,-np.cos(t)])\n    c1=d1*dTiCp; c2=d2*dTiCp\n    u1=np.array([-np.cos(t),0,-np.sin(t)]); u2=np.array([-np.cos(t),0, np.sin(t)])\n    rc={1:[],2:[]}; rm={1:[],2:[]}\n    for i,(c,u) in enumerate([(c1,u1),(c2,u2)],1):\n        for k in range(5):\n            phi=np.radians(72*k); rad=np.cos(phi)*u+np.sin(phi)*v; C=c+Rring*rad\n            rc[i].append(C)\n            if k!=0: rm[i].append(C+1.51*rad)\n    return rc,rm,d1,d2,u1,u2\n\ndef rot_y(e, beta):\n    c,s=np.cos(beta),np.sin(beta)\n    return np.array([c*e[0]+s*e[2], e[1], -s*e[0]+c*e[2]])\n\npsis=np.linspace(0,2*np.pi,1441)\nbest=None\nfor tdeg in np.arange(-6,30.01,0.5):\n    t=np.radians(tdeg)\n    rc,rm,d1,d2,u1,u2=rings(t)\n    ipso1=rc[1][0]\n    for bdeg in np.arange(0,30.01,1.0):\n        beta=np.radians(bdeg)\n        e_si=rot_y(u1,beta)\n        Si1=ipso1+1.87*e_si\n        a=unit(ipso1-Si1)\n        p=np.array([0,1,0]); p=unit(p-np.dot(p,a)*a); q=unit(np.cross(a,p))\n        E=c109*a[None,:]+s109*(np.cos(psis)[:,None]*p[None,:]+np.sin(psis)[:,None]*q[None,:])\n        Cas=Si1[None,:]+1.87*E\n        Cbs=Cas*np.array([1,-1,-1])\n        dCC=np.linalg.norm(Cas-Cbs,axis=1)\n        diff=dCC-1.54\n        idx=np.where(diff[:-1]*diff[1:]<0)[0]\n        for i in idx:\n            f=diff[i]/(diff[i]-diff[i+1])\n            Ca=Cas[i]*(1-f)+Cas[i+1]*f\n            Cb=Ca*np.array([1,-1,-1])\n            aCa=np.degrees(np.arccos(np.clip(np.dot(unit(Si1-Ca),unit(Cb-Ca)),-1,1)))\n            dev=abs(aCa-109.5)\n            if best is None or dev<best[0]:\n                best=(dev,tdeg,bdeg,Ca.copy(),aCa,Si1.copy())\ndev,tdeg,bdeg,Ca,aCa,Si1=best\nprint(\"best dev=%.2f tilt=%.1f bend=%.1f Ca=%s aCa=%.1f Si1=%s\"%(dev,tdeg,bdeg,np.round(Ca,3),aCa,np.round(Si1,3)))\nnp.save('bridge.npy', np.array([tdeg,bdeg,Ca[0],Ca[1],Ca[2]]))\nEOF\ntimeout 300 python3 build5.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 13729,
+   "output_tokens": 1079,
+   "total_tokens": 14808,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 12288
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 131
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "best dev=0.04 tilt=16.5 bend=29.0 Ca=[-4.537 -0.559  0.53 ] aCa=109.5 Si1=[-3.566  0.     2.027]\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_d6f956105f11434abc3c4366"
+ },
+ {
+  "type": "AIMessage",
+  "content": "Found a consistent bridge: tilt_half=16.5\u00b0, exocyclic bend=29\u00b0, all angles tetrahedral. Now build the full molecule.\n\n",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > build6.py << 'EOF'\nimport numpy as np\n\ndef unit(v):\n    v=np.array(v,float); return v/np.linalg.norm(v)\n\nRcc=1.42; Rring=Rcc/(2*np.sin(np.pi/5)); dTiCp=2.05\nv=np.array([0,1,0])\nc109=np.cos(np.radians(109.5)); s109=np.sin(np.radians(109.5))\ntdeg,bdeg,px,py,pz=np.load('bridge.npy')\nt=np.radians(tdeg); beta=np.radians(bdeg)\n\nd1=np.array([-np.sin(t),0, np.cos(t)]); d2=np.array([-np.sin(t),0,-np.cos(t)])\nc1=d1*dTiCp; c2=d2*dTiCp\nu1=np.array([-np.cos(t),0,-np.sin(t)]); u2=np.array([-np.cos(t),0, np.sin(t)])\nrc={1:[],2:[]}; rm={1:[],2:[]}\nfor i,(c,u) in enumerate([(c1,u1),(c2,u2)],1):\n    for k in range(5):\n        phi=np.radians(72*k); rad=np.cos(phi)*u+np.sin(phi)*v; C=c+Rring*rad\n        rc[i].append(C)\n        if k!=0: rm[i].append(C+1.51*rad)\nipso1,ipso2=rc[1][0],rc[2][0]\n\ndef rot_y(e,b):\n    c,s=np.cos(b),np.sin(b)\n    return np.array([c*e[0]+s*e[2], e[1], -s*e[0]+c*e[2]])\nSi1=ipso1+1.87*rot_y(u1,beta)\nSi2=ipso2+1.87*rot_y(u2,-beta)\nCa=np.array([px,py,pz]); Cb=np.array([px,-py,-pz])\nprint(\"check Si1-Ca\",np.linalg.norm(Si1-Ca),\"Ca-Cb\",np.linalg.norm(Ca-Cb))\nprint(\"aSi\",np.degrees(np.arccos(np.dot(unit(ipso1-Si1),unit(Ca-Si1)))))\nprint(\"aCa\",np.degrees(np.arccos(np.dot(unit(Si1-Ca),unit(Cb-Ca)))))\n\ndef two_more(d1v,d2v):\n    d1v,d2v=unit(d1v),unit(d2v); m=unit(d1v+d2v); n=unit(np.cross(d1v,d2v))\n    cb=np.dot(d1v,m); a=1.0/(3*cb); b=np.sqrt(max(1-a*a,1e-9))\n    return unit(-a*m+b*n), unit(-a*m-b*n)\ndef three_more(d):\n    d=unit(d)\n    p=np.array([1,0,0]) if abs(d[0])<0.9 else np.array([0,1,0])\n    p=unit(p-np.dot(p,d)*d); q=unit(np.cross(d,p)); out=[]\n    for phi in (0,120,240):\n        e=-d/3.0+(np.sqrt(8)/3)*(np.cos(np.radians(phi))*p+np.sin(np.radians(phi))*q)\n        out.append(unit(e))\n    return out\n\natoms=[('Ti',np.zeros(3))]\nfor i in (1,2):\n    for C in rc[i]: atoms.append(('C',C))\n    for C in rm[i]: atoms.append(('C',C))\natoms += [('Si',Si1),('Si',Si2)]\ne1,e2=two_more(ipso1-Si1,Ca-Si1); SiMe1=[Si1+1.86*e1,Si1+1.86*e2]\ne1,e2=two_more(ipso2-Si2,Cb-Si2); SiMe2=[Si2+1.86*e1,Si2+1.86*e2]\nfor C in SiMe1+SiMe2: atoms.append(('C',C))\nw=unit(-(d1+d2)); TiMe=w*2.10\natoms += [('C',Ca),('C',Cb),('C',TiMe)]\nH=[]\nfor i in (1,2):\n    for k in range(1,5):\n        Me=rm[i][k-1]; parent=rc[i][k]\n        for e in three_more(parent-Me): H.append(Me+1.09*e)\nfor Me,parent in [(SiMe1[0],Si1),(SiMe1[1],Si1),(SiMe2[0],Si2),(SiMe2[1],Si2)]:\n    for e in three_more(parent-Me): H.append(Me+1.09*e)\ne1,e2=two_more(Si1-Ca,Cb-Ca); H.append(Ca+1.09*e1); H.append(Ca+1.09*e2)\ne1,e2=two_more(Si2-Cb,Ca-Cb); H.append(Cb+1.09*e1); H.append(Cb+1.09*e2)\nfor e in three_more(-TiMe): H.append(TiMe+1.09*e)\nfor h in H: atoms.append(('H',h))\n\nP=np.array([a[1] for a in atoms])\nD=np.linalg.norm(P[:,None,:]-P[None,:,:],axis=-1); np.fill_diagonal(D,1e9)\ni,j=np.unravel_index(np.argmin(D),D.shape)\nprint(\"min pair dist:\",D.min(),\"atoms\",i,j,atoms[i][0],atoms[j][0])\nwith open('guess.xyz','w') as f:\n    f.write(f\"{len(atoms)}\\ninitial guess ansa-Ti(III) methyl complex\\n\")\n    for el,xyz in atoms: f.write(f\"{el} {xyz[0]:.6f} {xyz[1]:.6f} {xyz[2]:.6f}\\n\")\nprint(\"atoms:\",len(atoms))\nEOF\ntimeout 120 python3 build6.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 14760,
+   "output_tokens": 1912,
+   "total_tokens": 16672,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 13312
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 426
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "check Si1-Ca 1.869998417990563 Ca-Cb 1.5399985687529452\naSi 109.50001716481755\naCa 109.54385105463845\nmin pair dist: 1.0899999999999999 atoms 7 33 C H\natoms: 71\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_68124d91215a4d36a4912f22"
+ },
+ {
+  "type": "AIMessage",
+  "content": "All bond lengths/angles consistent now. Visual check:\n\n",
+  "tool_calls": [
+   {
+    "name": "view_molecule",
+    "args": {
+     "left_right_deg": 0,
+     "up_down_deg": 0,
+     "xyz_file_relative_path": "guess.xyz"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 16387,
+   "output_tokens": 103,
+   "total_tokens": 16490,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 14336
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 29
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[image]",
+  "name": "view_molecule",
+  "tool_call_id": "call_7d732f6118dd401687782fa7"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "view_molecule",
+    "args": {
+     "left_right_deg": 90,
+     "up_down_deg": 10,
+     "xyz_file_relative_path": "guess.xyz"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 17471,
+   "output_tokens": 100,
+   "total_tokens": 17571,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 16384
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 37
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[image]",
+  "name": "view_molecule",
+  "tool_call_id": "call_e1f41cf88edc4a8395b1b89a"
+ },
+ {
+  "type": "AIMessage",
+  "content": "The geometry now looks like a proper ansa-bridged titanocene methyl complex. Run xTB optimization (GFN2, doublet).\n\n",
+  "tool_calls": [
+   {
+    "name": "constraint_xtb",
+    "args": {
+     "charge": 0,
+     "gfn_method": "gfn2",
+     "input_xyz": "guess.xyz",
+     "ncores": 4,
+     "output_xyz": "answer.xyz",
+     "uhf": 1
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 18545,
+   "output_tokens": 183,
+   "total_tokens": 18728,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 17408
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 56
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "{\"return_code\": 0, \"output_xyz\": \"/h/400/skaxu/elagenteworkdir/mol_0099_004abd60_qwen3.8-max/answer.xyz\", \"log_path\": \"/h/400/skaxu/elagenteworkdir/mol_0099_004abd60_qwen3.8-max/answer.log\", \"error_msg\": null}",
+  "name": "constraint_xtb",
+  "tool_call_id": "call_3b33ac5ce3da41e2ba14a26d"
+ },
+ {
+  "type": "AIMessage",
+  "content": "Optimization succeeded. Let me verify the optimized structure.\n\n",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "head -5 answer.xyz; echo ...; tail -5 answer.log; grep -i \"converged\" answer.log | tail -3"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 18781,
+   "output_tokens": 100,
+   "total_tokens": 18881,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 18432
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 31
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "71\n energy: -80.516377694565 gnorm: 0.000137162470 xtb: 6.7.1 (edcfbbe)\nTi           0.08942685575159        0.07128447931052       -0.00206000715309\nC           -1.64917977539248        0.19062135243623        1.53476930422111\nC           -0.54507328686115        1.00183402339153        1.94878535892253\n...\n ANC optimizer:\n * wall-time:     0 d,  0 h,  0 min,  9.148 sec\n *  cpu-time:     0 d,  0 h,  0 min, 30.984 sec\n * ratio c/w:     3.387 speedup\n\n   *** GEOMETRY OPTIMIZATION CONVERGED AFTER 114 ITERATIONS ***\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_b26bf506002d4f2fb3e1393a"
+ },
+ {
+  "type": "AIMessage",
+  "content": "Converged. Verify key structural parameters of the optimized geometry:\n\n",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python3 - << 'EOF'\nimport numpy as np\nlines=open('answer.xyz').read().split('\\n')\nn=int(lines[0]); els=[]; P=[]\nfor l in lines[2:2+n]:\n    p=l.split(); els.append(p[0]); P.append([float(x) for x in p[1:4]])\nP=np.array(P)\nTi=P[0]\nring1=P[1:5+1-1+0]  # atoms 1..5 ring C\nr1=P[1:6]; r2=P[6:11]\ncen1=r1.mean(0); cen2=r2.mean(0)\nprint(\"Ti-centroid1 %.3f  Ti-centroid2 %.3f\"%(np.linalg.norm(Ti-cen1),np.linalg.norm(Ti-cen2)))\nprint(\"centroid-Ti-centroid angle %.1f\"%np.degrees(np.arccos(np.dot((cen1-Ti)/np.linalg.norm(cen1-Ti),(cen2-Ti)/np.linalg.norm(cen2-Ti)))))\nprint(\"Ti-C(ring) range ring1:\", np.round(np.linalg.norm(r1-Ti,axis=1),3))\nSi1=P[19]; Si2=P[20]\nprint(\"Si1-ipso %.3f Si1-Ca %.3f Ca-Cb %.3f\"%(np.linalg.norm(Si1-P[1]),np.linalg.norm(Si1-P[24]),np.linalg.norm(P[24]-P[25])))\nprint(\"Ti-C(Me) %.3f\"%np.linalg.norm(Ti-P[26]))\n# check all bonds reasonable: min distances\nD=np.linalg.norm(P[:,None]-P[None],axis=-1); np.fill_diagonal(D,99)\nprint(\"min pair dist\", D.min())\nEOF"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 19183,
+   "output_tokens": 483,
+   "total_tokens": 19666,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 18432
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 37
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "Ti-centroid1 1.948  Ti-centroid2 1.572\ncentroid-Ti-centroid angle 10.2\nTi-C(ring) range ring1: [2.324 2.253 2.288 2.286 2.317]\nSi1-ipso 1.880 Si1-Ca 5.446 Ca-Cb 4.475\nTi-C(Me) 4.962\nmin pair dist 1.084455857464165\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_92a18a5894b24e26b66b634e"
+ },
+ {
+  "type": "AIMessage",
+  "content": "Index mix-up in my check script. Recheck with correct indices:\n\n",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python3 - << 'EOF'\nimport numpy as np\nlines=open('answer.xyz').read().split('\\n')\nn=int(lines[0]); els=[]; P=[]\nfor l in lines[2:2+n]:\n    p=l.split(); els.append(p[0]); P.append([float(x) for x in p[1:4]])\nP=np.array(P)\nTi=P[0]\nr1=P[1:6]; r2=P[10:15]\ncen1=r1.mean(0); cen2=r2.mean(0)\nprint(\"Ti-centroid1 %.3f  Ti-centroid2 %.3f\"%(np.linalg.norm(Ti-cen1),np.linalg.norm(Ti-cen2)))\nu1=(cen1-Ti)/np.linalg.norm(cen1-Ti); u2=(cen2-Ti)/np.linalg.norm(cen2-Ti)\nprint(\"centroid-Ti-centroid %.1f deg\"%np.degrees(np.arccos(np.dot(u1,u2))))\nprint(\"Ti-C ring1\", np.round(np.linalg.norm(r1-Ti,axis=1),3))\nprint(\"Ti-C ring2\", np.round(np.linalg.norm(r2-Ti,axis=1),3))\nSi1=P[19]; Si2=P[20]; Ca=P[25]; Cb=P[26]; TiMe=P[27]\nprint(\"Si1-ipso1 %.3f  Si2-ipso2 %.3f\"%(np.linalg.norm(Si1-P[1]),np.linalg.norm(Si2-P[10])))\nprint(\"Si1-Ca %.3f  Si2-Cb %.3f  Ca-Cb %.3f\"%(np.linalg.norm(Si1-Ca),np.linalg.norm(Si2-Cb),np.linalg.norm(Ca-Cb)))\nprint(\"Ti-C(Me) %.3f\"%np.linalg.norm(Ti-TiMe))\nprint(\"ring C-C sample\", np.round([np.linalg.norm(r1[i]-r1[(i+1)%5]) for i in range(5)],3))\nprint(\"Si1-CMe\", np.round([np.linalg.norm(Si1-P[i]) for i in (21,22)],3))\nEOF"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 19780,
+   "output_tokens": 740,
+   "total_tokens": 20520,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 18432
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 209
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "Ti-centroid1 1.948  Ti-centroid2 1.943\ncentroid-Ti-centroid 142.1 deg\nTi-C ring1 [2.324 2.253 2.288 2.286 2.317]\nTi-C ring2 [2.317 2.258 2.292 2.302 2.278]\nSi1-ipso1 1.880  Si2-ipso2 1.881\nSi1-Ca 1.918  Si2-Cb 1.919  Ca-Cb 1.528\nTi-C(Me) 2.098\nring C-C sample [1.431 1.42  1.427 1.411 1.43 ]\nSi1-CMe [1.918 1.921]\n",
+  "name": "bash_kernel",
+  "tool_call_id": "call_d155396ad96448ad8933b1ec"
+ },
+ {
+  "type": "AIMessage",
+  "content": "All metrics are chemically reasonable (Ti\u2013Cp centroid ~1.95 \u00c5, angle ~142\u00b0 as expected for an ansa-metallocene, Ti\u2013Me 2.10 \u00c5, Si\u2013C ~1.88\u20131.92 \u00c5). Final visual confirmation:\n\n",
+  "tool_calls": [
+   {
+    "name": "view_molecule",
+    "args": {
+     "left_right_deg": 0,
+     "up_down_deg": 0,
+     "xyz_file_relative_path": "answer.xyz"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 20551,
+   "output_tokens": 263,
+   "total_tokens": 20814,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 19584
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 135
+   }
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[image]",
+  "name": "view_molecule",
+  "tool_call_id": "call_6d0eef04fa674f55800161f0"
+ },
+ {
+  "type": "AIMessage",
+  "content": "The optimized structure matches the drawing: a Ti(III) center (S = 1/2) sandwiched between two \u03b7\u2075-tetramethylcyclopentadienyl rings, with the ring ipso-carbons each bonded to a SiMe\u2082 group joined by an ethylene bridge (ansa-bridge), plus a Ti\u2013CH\u2083 ligand.\n\n**Verification summary:**\n- Formula: C\u2082\u2085H\u2084\u2083Si\u2082Ti (71 atoms, all explicit H included)\n- Ti\u2013Cp(centroid): 1.95 / 1.94 \u00c5; centroid\u2013Ti\u2013centroid \u2248 142\u00b0 (typical for ansa-metallocenes)\n- Ti\u2013C(ring): 2.25\u20132.32 \u00c5; Ti\u2013CH\u2083: 2.10 \u00c5\n- Si\u2013C(ipso) 1.88 \u00c5, Si\u2013CH\u2082 1.92 \u00c5, CH\u2082\u2013CH\u2082 1.53 \u00c5, Si\u2013CH\u2083 1.92 \u00c5\n- xTB (GFN2, uhf=1) geometry optimization converged (114 iterations)\n\n`answer.xyz` exists in the working directory in standard XYZ format (atom count line, comment line, element + Cartesian coordinates in \u00c5).\n\n**Done.** The 3D structure of the depicted ansa-(ethylene-bis-dimethylsilylene)-bis(tetramethylcyclopentadienyl)titanium(III) methyl complex has been built and saved as `answer.xyz`.",
+  "usage": {
+   "input_tokens": 21689,
+   "output_tokens": 426,
+   "total_tokens": 22115,
+   "input_token_details": {
+    "audio": 0,
+    "cache_read": 20480
+   },
+   "output_token_details": {
+    "audio": 0,
+    "reasoning": 82
+   }
+  }
+ }
+]

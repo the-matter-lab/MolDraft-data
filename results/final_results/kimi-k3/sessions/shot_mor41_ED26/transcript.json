@@ -1,0 +1,978 @@
+[
+ {
+  "type": "SystemMessage",
+  "content": "You are a helpful chemistry assistant. You build 3D molecular\n  structures from the chemical information you are given, including 2D drawings\n  supplied as images.\n\n  When you are given a 2D drawing of a molecule, your task is to produce the 3D\n  structure that drawing depicts and save it as `answer.xyz` in your working\n  directory.\n\n  Requirements for `answer.xyz`:\n  - Include all explicit hydrogens.\n  - Use a right-handed Cartesian coordinate system, units of angstroms.\n  - Standard XYZ format: first line is the total atom count, second line a\n    one-line comment, each remaining line `Element X Y Z`.\n\n  When you are done, confirm that `answer.xyz` exists in the working directory.\n  \n\n[IMPORTANT CONSTRAINT] You must NOT call multiple tools in parallel. Execute tools ONE AT A TIME, sequentially. Wait for each tool's result before calling the next tool. Never batch multiple tool calls in a single response."
+ },
+ {
+  "type": "HumanMessage",
+  "content": "A 2D structure of a molecule is provided as a PNG file in your working directory: mol_0211.png\n\nBuild the 3D structure it depicts and save it as answer.xyz.\n"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "view_png_file",
+    "args": {
+     "png_file_relative_path": "mol_0211.png"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 1408,
+   "output_tokens": 66,
+   "total_tokens": 1474
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[image]",
+  "name": "view_png_file",
+  "tool_call_id": "view_png_file:0"
+ },
+ {
+  "type": "AIMessage",
+  "content": "I'll analyze this structure: it's **(pentamethylcyclopentadienyl)(1,5-cyclooctadiene)ruthenium(II) chloride** \u2014 Cp*Ru(cod)Cl, a piano-stool complex with:\n- \u03b7\u2075-Cp* (C\u2085Me\u2085) on top\n- Ru center\n- Cl ligand\n- 1,5-cyclooctadiene chelating through both double bonds (\u03b7\u00b2:\u03b7\u00b2)\n\nTotal: C\u2081\u2088H\u2082\u2087ClRu = 47 atoms. Let me build an idealized geometry with a Python script.",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > build.py << 'EOF'\nimport numpy as np\n\natoms = []  # (element, xyz)\n\n# ---------- Ru at origin ----------\nRu = np.array([0.0, 0.0, 0.0])\natoms.append((\"Ru\", Ru))\n\n# ---------- Cp* ligand (above Ru, centroid on +z) ----------\nr_ring = 1.208      # ring C radius -> C-C ~1.42 A\nz_cp   = 1.85       # ring plane height above Ru\ncc_me  = 1.50       # ring C - methyl C\nch     = 1.09\n\nring_C = []\nme_C   = []\nfor i in range(5):\n    th = np.radians(90 + 72*i)\n    u_out = np.array([np.cos(th), np.sin(th), 0.0])   # radial outward\n    rc = r_ring*u_out + np.array([0,0,z_cp])\n    mc = (r_ring+cc_me)*u_out + np.array([0,0,z_cp])\n    ring_C.append(rc); me_C.append(mc)\n    atoms.append((\"C\", rc))\nfor i in range(5):\n    atoms.append((\"C\", me_C[i]))\n# methyl hydrogens\nfor i in range(5):\n    th = np.radians(90 + 72*i)\n    u_in  = -np.array([np.cos(th), np.sin(th), 0.0])  # methyl -> ring direction\n    t_hat = np.array([-np.sin(th), np.cos(th), 0.0])  # tangential\n    z_hat = np.array([0.0, 0.0, 1.0])\n    for phi in (0, 120, 240):\n        p = np.cos(np.radians(phi))*t_hat + np.sin(np.radians(phi))*z_hat\n        d = (-1.0/3.0)*u_in + (2*np.sqrt(2)/3.0)*p\n        d /= np.linalg.norm(d)\n        atoms.append((\"H\", me_C[i] + ch*d))\n\n# ---------- Cl ligand (one leg of piano stool) ----------\nalpha = np.radians(125)   # polar angle of legs from +z (Cp axis)\nsa, ca = np.sin(alpha), np.cos(alpha)\ndef leg(beta_deg, dist):\n    b = np.radians(beta_deg)\n    return dist*np.array([sa*np.cos(b), sa*np.sin(b), ca])\nCl = leg(90, 2.42)\natoms.append((\"Cl\", Cl))\n\n# ---------- 1,5-COD: two alkenes as two legs ----------\nM1 = leg(210, 2.05)   # midpoint C1=C2\nM2 = leg(330, 2.05)   # midpoint C5=C6\nm1 = M1/np.linalg.norm(M1); m2 = M2/np.linalg.norm(M2)\nn = np.cross(m1, m2); n /= np.linalg.norm(n)   # direction perp to both legs (C=C direction)\n\nhalf_cc = 0.70  # half of coordinated C=C (~1.40)\nC1 = M1 - half_cc*n\nC2 = M1 + half_cc*n\nC5 = M2 + half_cc*n\nC6 = M2 - half_cc*n\n\n# chain A: C2-C3-C4-C5 ; chain B: C1-C8-C7-C6\ndef bridge(P, Q):\n    # returns two CH2 positions between P and Q (symmetric arc bulging away from Ru)\n    mid = 0.5*(P+Q)\n    e = mid/np.linalg.norm(mid)          # outward bulge direction (away from Ru)\n    a = 0.77                              # half of C3-C4 distance (1.54/2)\n    xdir = (Q-P)/np.linalg.norm(Q-P)      # along the span\n    # solve bulge b so that |P - C3| = 1.54 with C3 = mid - a*xdir + b*e ... approximate planar zigzag\n    # horizontal leftover:\n    d_half = np.linalg.norm(Q-P)/2.0\n    dx = d_half - a\n    b = np.sqrt(max(1.54**2 - dx**2, 0.01))\n    C3 = mid - a*xdir + b*e\n    C4 = mid + a*xdir + b*e\n    return C3, C4\n\nC3, C4 = bridge(C2, C5)\nC8, C7 = bridge(C1, C6)\n\ncod = [C1, C2, C3, C4, C5, C6, C7, C8]\nfor c in cod:\n    atoms.append((\"C\", c))\n\n# ---------- hydrogens on COD ----------\ndef sp2_H(C, A, B, d=1.08):\n    u1 = (A-C)/np.linalg.norm(A-C); u2 = (B-C)/np.linalg.norm(B-C)\n    h = -(u1+u2); h /= np.linalg.norm(h)\n    return C + d*h\n\ndef sp3_H2(C, A, B, d=1.09):\n    u1 = (A-C)/np.linalg.norm(A-C); u2 = (B-C)/np.linalg.norm(B-C)\n    m = -(u1+u2); m /= np.linalg.norm(m)\n    w = np.cross(u1, u2); w /= np.linalg.norm(w)\n    h1 = -0.5774*m + 0.8165*w\n    h2 = -0.5774*m - 0.8165*w\n    return C + d*h1/np.linalg.norm(h1), C + d*h2/np.linalg.norm(h2)\n\natoms.append((\"H\", sp2_H(C1, C2, C8)))\natoms.append((\"H\", sp2_H(C2, C1, C3)))\natoms.append((\"H\", sp2_H(C5, C6, C4)))\natoms.append((\"H\", sp2_H(C6, C5, C7)))\nfor (Cc, Aa, Bb) in [(C3, C2, C4), (C4, C3, C5), (C7, C6, C8), (C8, C1, C7)]:\n    h1, h2 = sp3_H2(Cc, Aa, Bb)\n    atoms.append((\"H\", h1)); atoms.append((\"H\", h2))\n\n# ---------- write xyz ----------\nwith open(\"guess.xyz\", \"w\") as f:\n    f.write(f\"{len(atoms)}\\nCp*Ru(cod)Cl initial guess\\n\")\n    for el, p in atoms:\n        f.write(f\"{el:2s} {p[0]:12.6f} {p[1]:12.6f} {p[2]:12.6f}\\n\")\nprint(f\"wrote guess.xyz with {len(atoms)} atoms\")\n# quick sanity: distances\nd = lambda a,b: np.linalg.norm(a-b)\nprint(\"Ru-Cl:\", d(Ru, Cl))\nprint(\"Ru-C(ring):\", [round(d(Ru,c),3) for c in ring_C])\nprint(\"Ru-alkene C:\", round(d(Ru,C1),3), round(d(Ru,C2),3), round(d(Ru,C5),3), round(d(Ru,C6),3))\nprint(\"C=C:\", d(C1,C2), d(C5,C6))\nprint(\"bridges C2-C3,C3-C4,C4-C5:\", round(d(C2,C3),3), round(d(C3,C4),3), round(d(C4,C5),3))\nprint(\"bridges C1-C8,C8-C7,C7-C6:\", round(d(C1,C8),3), round(d(C8,C7),3), round(d(C7,C6),3))\nEOF\npython3 build.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 2102,
+   "output_tokens": 12261,
+   "total_tokens": 14363
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "wrote guess.xyz with 47 atoms\nRu-Cl: 2.42\nRu-C(ring): [np.float64(2.209), np.float64(2.209), np.float64(2.209), np.float64(2.209), np.float64(2.209)]\nRu-alkene C: 2.166 2.166 2.166 2.166\nC=C: 1.3999999999999997 1.4\nbridges C2-C3,C3-C4,C4-C5: 1.54 1.54 1.54\nbridges C1-C8,C8-C7,C7-C6: 1.54 1.54 1.54\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:1"
+ },
+ {
+  "type": "AIMessage",
+  "content": "The initial geometry is self-consistent. Let me view it to check the overall arrangement.",
+  "tool_calls": [
+   {
+    "name": "view_molecule",
+    "args": {
+     "xyz_file_relative_path": "guess.xyz",
+     "left_right_deg": 0,
+     "up_down_deg": 0,
+     "reset_view": true
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 14551,
+   "output_tokens": 141,
+   "total_tokens": 14692
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[image]",
+  "name": "view_molecule",
+  "tool_call_id": "view_molecule:2"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "view_molecule",
+    "args": {
+     "xyz_file_relative_path": "guess.xyz",
+     "left_right_deg": 90,
+     "up_down_deg": 20
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 16068,
+   "output_tokens": 218,
+   "total_tokens": 16286
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[image]",
+  "name": "view_molecule",
+  "tool_call_id": "view_molecule:3"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "constraint_xtb",
+    "args": {
+     "input_xyz": "guess.xyz",
+     "output_xyz": "opt.xyz",
+     "gfn_method": "gfn2",
+     "charge": 0,
+     "uhf": 0,
+     "ncores": 4
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 17662,
+   "output_tokens": 225,
+   "total_tokens": 17887
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "{\"return_code\": 0, \"output_xyz\": \"/h/400/skaxu/elagenteworkdir/mol_0211_8314f5f8_kimi-k3/opt.xyz\", \"log_path\": \"/h/400/skaxu/elagenteworkdir/mol_0211_8314f5f8_kimi-k3/opt.log\", \"error_msg\": null}",
+  "name": "constraint_xtb",
+  "tool_call_id": "constraint_xtb:4"
+ },
+ {
+  "type": "AIMessage",
+  "content": "Optimization completed. Let me check key geometric parameters of the optimized structure to ensure the haptic bonding was preserved.",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python3 << 'EOF'\nimport numpy as np\nlines = open(\"opt.xyz\").read().splitlines()\nn = int(lines[0]); print(\"comment:\", lines[1]); print(\"atoms:\", n)\ncoords = []\nelems = []\nfor ln in lines[2:2+n]:\n    p = ln.split()\n    elems.append(p[0]); coords.append([float(p[1]), float(p[2]), float(p[3])])\ncoords = np.array(coords)\nRu = coords[0]; Cl = coords[25]\nring = coords[1:6]; me = coords[6:11]\ncod = coords[26:34]\nd = lambda a,b: np.linalg.norm(a-b)\nprint(\"Ru-Cl:\", round(d(Ru,Cl),3))\nprint(\"Ru-C(ring):\", [round(d(Ru,c),3) for c in ring])\ncent = ring.mean(axis=0)\nprint(\"Ru-centroid:\", round(d(Ru,cent),3))\nprint(\"Ru-C(cod sp2):\", [round(d(Ru,c),3) for c in cod[[0,1,4,5]]])\nprint(\"C=C:\", round(d(cod[0],cod[1]),3), round(d(cod[4],cod[5]),3))\nprint(\"ring C-C:\", [round(d(ring[i],ring[(i+1)%5]),3) for i in range(5)])\nprint(\"C-Me:\", [round(d(ring[i],me[i]),3) for i in range(5)])\n# count H\nhs = [e for e in elems if e==\"H\"]; print(\"H count:\", len(hs))\nEOF"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 17999,
+   "output_tokens": 454,
+   "total_tokens": 18453
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "comment:  energy: -60.017651900817 gnorm: 0.000792297807 xtb: 6.7.1 (edcfbbe)\natoms: 47\nRu-Cl: 3.836\nRu-C(ring): [np.float64(2.244), np.float64(2.288), np.float64(2.48), np.float64(2.485), np.float64(2.25)]\nRu-centroid: 2.013\nRu-C(cod sp2): [np.float64(2.387), np.float64(2.292), np.float64(3.784), np.float64(3.205)]\nC=C: 3.5 1.331\nring C-C: [np.float64(1.42), np.float64(1.455), np.float64(1.4), np.float64(1.453), np.float64(1.429)]\nC-Me: [np.float64(1.495), np.float64(1.5), np.float64(1.495), np.float64(1.493), np.float64(1.5)]\nH count: 27\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:5"
+ },
+ {
+  "type": "AIMessage",
+  "content": "The GFN2 optimization broke the complex (Cl dissociated, Ru-Cl = 3.84 \u00c5; one C=C stretched to 3.5 \u00c5). GFN2-xTB handles this haptic/alkene Ru bonding poorly. Let me look at what happened:",
+  "tool_calls": [
+   {
+    "name": "view_molecule",
+    "args": {
+     "xyz_file_relative_path": "opt.xyz",
+     "left_right_deg": 90,
+     "up_down_deg": 20,
+     "reset_view": true
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 18734,
+   "output_tokens": 1048,
+   "total_tokens": 19782
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[image]",
+  "name": "view_molecule",
+  "tool_call_id": "view_molecule:6"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python3 << 'EOF'\nimport numpy as np\ndef load(fn):\n    lines = open(fn).read().splitlines()\n    n = int(lines[0])\n    elems, coords = [], []\n    for ln in lines[2:2+n]:\n        p = ln.split(); elems.append(p[0]); coords.append([float(x) for x in p[1:4]])\n    return elems, np.array(coords)\n\nfor fn in [\"guess.xyz\", \"opt.xyz\"]:\n    elems, c = load(fn)\n    d = lambda a,b: np.linalg.norm(a-b)\n    Ru, Cl = c[0], c[26]\n    C1,C2,C3,C4,C5,C6,C7,C8 = c[27:35]\n    print(f\"--- {fn} ---\")\n    print(\"elem[26] =\", elems[26], \"| Ru-Cl:\", round(d(Ru,Cl),3))\n    print(\"Ru-C(sp2):\", [round(x,3) for x in (d(Ru,C1),d(Ru,C2),d(Ru,C5),d(Ru,C6))])\n    print(\"C=C:\", round(d(C1,C2),3), round(d(C5,C6),3))\n    print(\"cod chain C2-C3-C4-C5:\", round(d(C2,C3),3), round(d(C3,C4),3), round(d(C4,C5),3))\n    print(\"cod chain C1-C8-C7-C6:\", round(d(C1,C8),3), round(d(C8,C7),3), round(d(C7,C6),3))\n    ring = c[1:6]\n    print(\"Ru-Cp ring:\", [round(d(Ru,r),3) for r in ring])\nEOF"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 21158,
+   "output_tokens": 1024,
+   "total_tokens": 22182
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "--- guess.xyz ---\nelem[26] = Cl | Ru-Cl: 2.42\nRu-C(sp2): [np.float64(2.166), np.float64(2.166), np.float64(2.166), np.float64(2.166)]\nC=C: 1.4 1.4\ncod chain C2-C3-C4-C5: 1.54 1.54 1.54\ncod chain C1-C8-C7-C6: 1.54 1.54 1.54\nRu-Cp ring: [np.float64(2.209), np.float64(2.209), np.float64(2.209), np.float64(2.209), np.float64(2.209)]\n--- opt.xyz ---\nelem[26] = Cl | Ru-Cl: 2.387\nRu-C(sp2): [np.float64(2.292), np.float64(3.183), np.float64(3.205), np.float64(2.256)]\nC=C: 1.463 1.461\ncod chain C2-C3-C4-C5: 1.329 4.536 1.331\ncod chain C1-C8-C7-C6: 1.38 2.568 1.392\nRu-Cp ring: [np.float64(2.244), np.float64(2.288), np.float64(2.48), np.float64(2.485), np.float64(2.25)]\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:7"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "constraint_xtb",
+    "args": {
+     "input_xyz": "guess.xyz",
+     "output_xyz": "opt_ff.xyz",
+     "gfn_method": "gfnff",
+     "charge": 0,
+     "uhf": 0,
+     "ncores": 4,
+     "force_constant": 0.5,
+     "distance_constraints": [
+      {
+       "atoms": [
+        0,
+        26
+       ],
+       "value": 2.42
+      },
+      {
+       "atoms": [
+        0,
+        27
+       ],
+       "value": 2.18
+      },
+      {
+       "atoms": [
+        0,
+        28
+       ],
+       "value": 2.18
+      },
+      {
+       "atoms": [
+        0,
+        31
+       ],
+       "value": 2.18
+      },
+      {
+       "atoms": [
+        0,
+        32
+       ],
+       "value": 2.18
+      },
+      {
+       "atoms": [
+        0,
+        1
+       ],
+       "value": 2.21
+      },
+      {
+       "atoms": [
+        0,
+        2
+       ],
+       "value": 2.21
+      },
+      {
+       "atoms": [
+        0,
+        3
+       ],
+       "value": 2.21
+      },
+      {
+       "atoms": [
+        0,
+        4
+       ],
+       "value": 2.21
+      },
+      {
+       "atoms": [
+        0,
+        5
+       ],
+       "value": 2.21
+      }
+     ]
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 22538,
+   "output_tokens": 1482,
+   "total_tokens": 24020
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "{\"return_code\": 0, \"output_xyz\": \"/h/400/skaxu/elagenteworkdir/mol_0211_8314f5f8_kimi-k3/opt_ff.xyz\", \"log_path\": \"/h/400/skaxu/elagenteworkdir/mol_0211_8314f5f8_kimi-k3/opt_ff.log\", \"error_msg\": null}",
+  "name": "constraint_xtb",
+  "tool_call_id": "constraint_xtb:8"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python3 << 'EOF'\nimport numpy as np\ndef load(fn):\n    lines = open(fn).read().splitlines()\n    n = int(lines[0])\n    elems, coords = [], []\n    for ln in lines[2:2+n]:\n        p = ln.split(); elems.append(p[0]); coords.append([float(x) for x in p[1:4]])\n    return elems, np.array(coords), lines[1]\n\nelems, c, com = load(\"opt_ff.xyz\")\nprint(\"comment:\", com)\nd = lambda a,b: np.linalg.norm(a-b)\nRu, Cl = c[0], c[26]\nring = c[1:6]; me = c[6:11]\nC1,C2,C3,C4,C5,C6,C7,C8 = c[27:35]\nprint(\"Ru-Cl:\", round(d(Ru,Cl),3))\nprint(\"Ru-Cp ring:\", [round(d(Ru,r),3) for r in ring])\nprint(\"Ru-centroid:\", round(d(Ru, ring.mean(axis=0)),3))\nprint(\"Ru-C(sp2):\", [round(x,3) for x in (d(Ru,C1),d(Ru,C2),d(Ru,C5),d(Ru,C6))])\nprint(\"C=C:\", round(d(C1,C2),3), round(d(C5,C6),3))\nprint(\"chainA C2-C3-C4-C5:\", round(d(C2,C3),3), round(d(C3,C4),3), round(d(C4,C5),3))\nprint(\"chainB C1-C8-C7-C6:\", round(d(C1,C8),3), round(d(C8,C7),3), round(d(C7,C6),3))\nprint(\"ring C-C:\", [round(d(ring[i],ring[(i+1)%5]),3) for i in range(5)])\nprint(\"C-Me:\", [round(d(ring[i],me[i]),3) for i in range(5)])\n# angles at CH2\ndef ang(a,b,c):\n    v1=a-b; v2=c-b\n    return np.degrees(np.arccos(np.dot(v1,v2)/np.linalg.norm(v1)/np.linalg.norm(v2)))\nprint(\"ang C2-C3-C4:\", round(ang(C2,C3,C4),1), \" C3-C4-C5:\", round(ang(C3,C4,C5),1))\nprint(\"ang C1-C8-C7:\", round(ang(C1,C8,C7),1), \" C8-C7-C6:\", round(ang(C8,C7,C6),1))\nprint(\"ang C3-C2-C1:\", round(ang(C3,C2,C1),1), \" C4-C5-C6:\", round(ang(C4,C5,C6),1))\nprint(\"ang C8-C1-C2:\", round(ang(C8,C1,C2),1), \" C7-C6-C5:\", round(ang(C7,C6,C5),1))\n# any short H-H or nonbonded contacts?\nimport itertools\nheavy = [i for i,e in enumerate(elems)]\nmind = 9\npair=None\nfor i,j in itertools.combinations(range(len(elems)),2):\n    dd = d(c[i],c[j])\n    if dd < mind:\n        mind = dd; pair=(elems[i],i,elems[j],j)\nprint(\"shortest contact:\", pair, round(mind,3))\nEOF"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 24183,
+   "output_tokens": 802,
+   "total_tokens": 24985
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "comment:  energy: -8.051842221835 gnorm: 0.000462757646 xtb: 6.7.1 (edcfbbe)\nRu-Cl: 2.444\nRu-Cp ring: [np.float64(2.213), np.float64(2.21), np.float64(2.212), np.float64(2.212), np.float64(2.21)]\nRu-centroid: 1.828\nRu-C(sp2): [np.float64(2.185), np.float64(2.185), np.float64(2.185), np.float64(2.185)]\nC=C: 1.358 1.358\nchainA C2-C3-C4-C5: 1.504 1.527 1.504\nchainB C1-C8-C7-C6: 1.506 1.526 1.506\nring C-C: [np.float64(1.462), np.float64(1.463), np.float64(1.461), np.float64(1.462), np.float64(1.462)]\nC-Me: [np.float64(1.501), np.float64(1.5), np.float64(1.503), np.float64(1.502), np.float64(1.5)]\nang C2-C3-C4: 117.1  C3-C4-C5: 117.1\nang C1-C8-C7: 117.0  C8-C7-C6: 117.0\nang C3-C2-C1: 116.8  C4-C5-C6: 116.8\nang C8-C1-C2: 116.5  C7-C6-C5: 116.5\nshortest contact: ('H', 43, 'H', 46) 0.859\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:9"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python3 << 'EOF'\nimport numpy as np\ndef load(fn):\n    lines = open(fn).read().splitlines()\n    n = int(lines[0])\n    elems, coords = [], []\n    for ln in lines[2:2+n]:\n        p = ln.split(); elems.append(p[0]); coords.append([float(x) for x in p[1:4]])\n    return elems, np.array(coords)\n\nfor fn in [\"guess.xyz\",\"opt_ff.xyz\"]:\n    elems, c = load(fn)\n    d = lambda a,b: np.linalg.norm(a-b)\n    print(fn, \"H43-H46:\", round(d(c[43],c[46]),3), \"| C7-C8 (idx33-34):\", round(d(c[33],c[34]),3))\n    # all H-H contacts < 1.5\n    import itertools\n    clashes=[]\n    for i,j in itertools.combinations(range(len(elems)),2):\n        if elems[i]==\"H\" and elems[j]==\"H\":\n            dd=d(c[i],c[j])\n            if dd<1.6: clashes.append((i,j,round(dd,3)))\n    print(\"  H-H<1.6:\", clashes)\nEOF"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 25423,
+   "output_tokens": 704,
+   "total_tokens": 26127
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "guess.xyz H43-H46: 0.877 | C7-C8 (idx33-34): 1.54\n  H-H<1.6: [(19, 36, np.float64(1.103)), (39, 41, np.float64(0.877)), (39, 43, np.float64(1.027)), (39, 46, np.float64(0.535)), (40, 42, np.float64(0.877)), (41, 43, np.float64(0.535)), (41, 46, np.float64(1.027)), (43, 46, np.float64(0.877)), (44, 45, np.float64(0.877))]\nopt_ff.xyz H43-H46: 0.859 | C7-C8 (idx33-34): 1.526\n  H-H<1.6: [(39, 41, np.float64(0.859)), (39, 43, np.float64(1.233)), (39, 46, np.float64(0.884)), (40, 42, np.float64(0.902)), (41, 43, np.float64(0.884)), (41, 46, np.float64(1.233)), (43, 46, np.float64(0.859)), (44, 45, np.float64(0.902))]\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:10"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python3 -c \"\ntry:\n    import rdkit\n    print('rdkit', rdkit.__version__)\nexcept Exception as e:\n    print('no rdkit:', e)\ntry:\n    from rdkit.Chem import AllChem\n    print('AllChem ok')\nexcept Exception as e:\n    print('no AllChem:', e)\n\""
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 26466,
+   "output_tokens": 1845,
+   "total_tokens": 28311
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "rdkit 2026.03.1\nAllChem ok\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:11"
+ },
+ {
+  "type": "AIMessage",
+  "content": "RDKit is available. I'll rebuild the cod ligand properly with RDKit (natural tub conformation with clean hydrogens), dock it onto the Ru center, add Cp* and Cl, then re-optimize. Let me generate the cod conformers first:",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > cod.py << 'EOF'\nimport numpy as np\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem\n\n# (Z,Z)-1,5-cyclooctadiene\nmol = Chem.MolFromSmiles(r\"C1/C=C\\CC/C=C\\C1\")\nmol = Chem.AddHs(mol)\nps = AllChem.ETKDGv3(); ps.randomSeed = 42\nids = AllChem.EmbedMultipleConfs(mol, numConfs=30, params=ps)\nprint(\"conformers:\", len(ids))\nres = AllChem.MMFFOptimizeMoleculeConfs(mol, maxIters=500)\n\n# find double bonds (heavy atoms)\ndbl = [(b.GetBeginAtomIdx(), b.GetEndAtomIdx()) for b in mol.GetBonds() if b.GetBondType()==Chem.BondType.DOUBLE]\nprint(\"double bonds:\", dbl)\n# check cis via dihedrals of ring: ring order 0-1=2-3-4-5=6-7-0\nfrom rdkit.Chem import rdMolTransforms as T\nbest = None\nfor cid in ids:\n    conf = mol.GetConformer(cid)\n    # midpoints\n    def mid(b):\n        a,b2 = b\n        return (np.array(conf.GetAtomPosition(a)) + np.array(conf.GetAtomPosition(b2)))/2\n    M1, M2 = mid(dbl[0]), mid(dbl[1])\n    dMM = np.linalg.norm(M1-M2)\n    # cis check: dihedral across each double bond using ring neighbors (0-1=2-3 and 4-5=6-7)\n    d1 = T.GetDihedralDeg(conf, 0, dbl[0][0], dbl[0][1], 3)\n    d2 = T.GetDihedralDeg(conf, 4, dbl[1][0], dbl[1][1], 7)\n    print(cid, \"dMM:\", round(dMM,3), \"dihedrals:\", round(d1,1), round(d2,1), \"energy:\", round(res[cid][1],2))\n    if best is None or dMM < best[1]:\n        if abs(d1) < 90 and abs(d2) < 90:\n            best = (cid, dMM)\nprint(\"chosen conformer:\", best)\nEOF\npython3 cod.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 28356,
+   "output_tokens": 5148,
+   "total_tokens": 33504
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "conformers: 30\ndouble bonds: [(1, 2), (5, 6)]\n0 dMM: 3.45 dihedrals: -0.0 0.0 energy: 36.39\n1 dMM: 3.45 dihedrals: -0.0 -0.0 energy: 36.39\n2 dMM: 3.45 dihedrals: 0.0 -0.0 energy: 36.39\n3 dMM: 3.214 dihedrals: 3.2 3.2 energy: 33.86\n4 dMM: 3.45 dihedrals: -0.0 -0.0 energy: 36.39\n5 dMM: 3.279 dihedrals: 0.0 0.0 energy: 37.87\n6 dMM: 3.279 dihedrals: 0.0 0.0 energy: 37.87\n7 dMM: 3.45 dihedrals: -0.0 -0.0 energy: 36.39\n8 dMM: 3.214 dihedrals: -3.2 -3.2 energy: 33.86\n9 dMM: 3.279 dihedrals: 0.0 0.0 energy: 37.87\n10 dMM: 3.214 dihedrals: 3.2 3.2 energy: 33.86\n11 dMM: 3.45 dihedrals: -0.0 0.0 energy: 36.39\n12 dMM: 3.214 dihedrals: -3.2 -3.2 energy: 33.86\n13 dMM: 3.45 dihedrals: -0.0 0.0 energy: 36.39\n14 dMM: 3.45 dihedrals: 0.0 0.0 energy: 36.39\n15 dMM: 3.214 dihedrals: -3.2 -3.2 energy: 33.86\n16 dMM: 3.214 dihedrals: -3.2 -3.2 energy: 33.86\n17 dMM: 3.45 dihedrals: -0.0 0.0 energy: 36.39\n18 dMM: 3.45 dihedrals: -0.0 0.0 energy: 36.39\n19 dMM: 3.45 dihedrals: -0.0 0.0 energy: 36.39\n20 dMM: 3.45 dihedrals: 0.0 -0.0 energy: 36.39\n21 dMM: 3.214 dihedrals: -3.2 -3.2 energy: 33.86\n22 dMM: 3.214 dihedrals: -3.2 -3.2 energy: 33.86\n23 dMM: 3.45 dihedrals: -0.0 -0.0 energy: 36.39\n24 dMM: 3.214 dihedrals: -3.2 -3.2 energy: 33.86\n25 dMM: 3.45 dihedrals: -0.0 0.0 energy: 36.39\n26 dMM: 3.214 dihedrals: 3.2 3.2 energy: 33.86\n27 dMM: 3.45 dihedrals: -0.0 0.0 energy: 36.39\n28 dMM: 3.45 dihedrals: -0.0 -0.0 energy: 36.39\n29 dMM: 3.45 dihedrals: -0.0 0.0 energy: 36.39\nchosen conformer: (24, np.float64(3.2138487718573265))\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:12"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > assemble.py << 'EOF'\nimport numpy as np\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem\n\nmol = Chem.MolFromSmiles(r\"C1/C=C\\CC/C=C\\C1\")\nmol = Chem.AddHs(mol)\nps = AllChem.ETKDGv3(); ps.randomSeed = 42\nids = AllChem.EmbedMultipleConfs(mol, numConfs=30, params=ps)\nAllChem.MMFFOptimizeMoleculeConfs(mol, maxIters=500)\nconf = mol.GetConformer(24)\n\nn = mol.GetNumAtoms()\nsyms = [a.GetSymbol() for a in mol.GetAtoms()]\nP = np.array([list(conf.GetAtomPosition(i)) for i in range(n)])\n\ndbl = [(1,2),(5,6)]\nM1 = (P[1]+P[2])/2; M2 = (P[5]+P[6])/2\nO = (M1+M2)/2\nv = (M2-M1); dMM = np.linalg.norm(v); v/=dMM\nB = P[[0,3,4,7]].mean(axis=0)\n\n# ---- target frame: Ru at origin, Cp axis +z, legs polar 125 deg ----\nalpha = np.radians(125); sa, ca = np.sin(alpha), np.cos(alpha)\ndef leg(beta_deg):\n    b = np.radians(beta_deg); return np.array([sa*np.cos(b), sa*np.sin(b), ca])\nu1, u2 = leg(210), leg(330)\nr_M = dMM/np.linalg.norm(u1-u2)\nM1t, M2t = r_M*u1, r_M*u2\nT = (M1t+M2t)/2\nvt = (M2t-M1t); vt/=np.linalg.norm(vt)\n\ndef rot_align(a, b):\n    # rotation matrix aligning unit a to unit b\n    ax = np.cross(a, b); s = np.linalg.norm(ax); c = np.dot(a,b)\n    if s < 1e-12: return np.eye(3)\n    ax/=s\n    K = np.array([[0,-ax[2],ax[1]],[ax[2],0,-ax[0]],[-ax[1],ax[0],0]])\n    return np.eye(3) + s*K + (1-c)*(K@K)\n\nR1 = rot_align(v, vt)\nB1 = R1@(B-O) + T\n# rotate about vt to put bridges away from Ru\nb = B1 - T; b_perp = b - np.dot(b,vt)*vt\nRu0 = np.zeros(3)\nw = (T-Ru0); w_perp = w - np.dot(w,vt)*vt\nR2 = rot_align(b_perp/np.linalg.norm(b_perp), w_perp/np.linalg.norm(w_perp))\nPc = (R2@(R1@(P-O).T)).T + T\n# check\nM1c = (Pc[1]+Pc[2])/2; M2c=(Pc[5]+Pc[6])/2; Bc = Pc[[0,3,4,7]].mean(axis=0)\nprint(\"M1 target:\", M1t, \" got:\", M1c)\nprint(\"M2 target:\", M2t, \" got:\", M2c)\nprint(\"bridge dist from Ru:\", round(np.linalg.norm(Bc),3), \" T dist:\", round(np.linalg.norm(T),3))\n\n# ---- Cp* and Cl (idealized, as before) ----\nextra = []  # (el, xyz)\nRu = np.zeros(3); extra.append((\"Ru\", Ru))\nr_ring=1.208; z_cp=1.85; cc_me=1.50; ch=1.09\nringC=[]; meC=[]\nfor i in range(5):\n    th=np.radians(90+72*i)\n    u_out=np.array([np.cos(th),np.sin(th),0.0])\n    rc=r_ring*u_out+[0,0,z_cp]; mc=(r_ring+cc_me)*u_out+[0,0,z_cp]\n    ringC.append(np.array(rc)); meC.append(np.array(mc))\nfor rc in ringC: extra.append((\"C\", rc))\nfor mc in meC: extra.append((\"C\", mc))\nfor i in range(5):\n    th=np.radians(90+72*i)\n    u_in=-np.array([np.cos(th),np.sin(th),0.0]); t_hat=np.array([-np.sin(th),np.cos(th),0.0]); z_hat=np.array([0.,0.,1.])\n    for phi in (0,120,240):\n        p=np.cos(np.radians(phi))*t_hat+np.sin(np.radians(phi))*z_hat\n        d=(-1/3)*u_in+(2*np.sqrt(2)/3)*p; d/=np.linalg.norm(d)\n        extra.append((\"H\", meC[i]+ch*d))\nCl = 2.42*leg(90); extra.append((\"Cl\", Cl))\n\n# ---- assemble: Ru, Cl, Cp*, then cod ----\natoms = []\natoms.append((\"Ru\", Ru))\natoms.append((\"Cl\", Cl))\ncp_part = extra[1:]   # ring C, me C, me H\natoms += cp_part\nfor s_,p_ in zip(syms, Pc): atoms.append((s_, p_))\n\nwith open(\"guess2.xyz\",\"w\") as f:\n    f.write(f\"{len(atoms)}\\nCp*Ru(cod)Cl docked\\n\")\n    for el,p in atoms: f.write(f\"{el:2s} {p[0]:12.6f} {p[1]:12.6f} {p[2]:12.6f}\\n\")\nprint(\"atoms:\", len(atoms))\n\n# ---- clash check ----\nimport itertools\nC = np.array([p for _,p in atoms]); E=[e for e,_ in atoms]\nbad=[]\nfor i,j in itertools.combinations(range(len(E)),2):\n    dd=np.linalg.norm(C[i]-C[j])\n    if (E[i]==\"H\" and E[j]==\"H\" and dd<1.6) or (dd<1.4 and not(E[i]==\"H\" and E[j]==\"H\")):\n        bad.append((E[i],i,E[j],j,round(dd,3)))\nprint(\"close contacts:\", bad[:20])\n# key distances\nd=lambda a,b: np.linalg.norm(a-b)\nprint(\"Ru-Cl:\", round(d(Ru,Cl),3))\nprint(\"Ru-cod sp2:\", [round(d(Ru,Pc[k]),3) for k in (1,2,5,6)])\nEOF\npython3 assemble.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 34386,
+   "output_tokens": 2566,
+   "total_tokens": 36952
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "M1 target: [-1.60692439 -0.92775823 -1.29924661]  got: [-1.60692439 -0.92775823 -1.29924661]\nM2 target: [ 1.60692439 -0.92775823 -1.29924661]  got: [ 1.60692439 -0.92775823 -1.29924661]\nbridge dist from Ru: 2.251  T dist: 1.596\natoms: 48\nclose contacts: [('Cl', 1, 'Cl', 27, np.float64(0.0)), ('Cl', 1, 'H', 41, np.float64(1.14)), ('C', 7, 'H', 12, np.float64(1.09)), ('C', 7, 'H', 13, np.float64(1.09)), ('C', 7, 'H', 14, np.float64(1.09)), ('C', 8, 'H', 15, np.float64(1.09)), ('C', 8, 'H', 16, np.float64(1.09)), ('C', 8, 'H', 17, np.float64(1.09)), ('C', 9, 'H', 18, np.float64(1.09)), ('C', 9, 'H', 19, np.float64(1.09)), ('C', 9, 'H', 20, np.float64(1.09)), ('C', 10, 'H', 21, np.float64(1.09)), ('C', 10, 'H', 22, np.float64(1.09)), ('C', 10, 'H', 23, np.float64(1.09)), ('C', 11, 'H', 24, np.float64(1.09)), ('C', 11, 'H', 25, np.float64(1.09)), ('C', 11, 'H', 26, np.float64(1.09)), ('H', 20, 'H', 38, np.float64(1.322)), ('H', 23, 'H', 47, np.float64(1.048)), ('Cl', 27, 'H', 41, np.float64(1.14))]\nRu-Cl: 2.42\nRu-cod sp2: [np.float64(2.437), np.float64(2.286), np.float64(2.437), np.float64(2.286)]\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:13"
+ },
+ {
+  "type": "AIMessage",
+  "content": "Two bugs: Cl got duplicated (48 atoms) and there are some methyl-H/cod-H close contacts. Let me fix the assembly:",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > assemble2.py << 'EOF'\nimport numpy as np\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem\n\nmol = Chem.MolFromSmiles(r\"C1/C=C\\CC/C=C\\C1\")\nmol = Chem.AddHs(mol)\nps = AllChem.ETKDGv3(); ps.randomSeed = 42\nAllChem.EmbedMultipleConfs(mol, numConfs=30, params=ps)\nAllChem.MMFFOptimizeMoleculeConfs(mol, maxIters=500)\nconf = mol.GetConformer(24)\nn = mol.GetNumAtoms()  # 20\nsyms = [a.GetSymbol() for a in mol.GetAtoms()]\nP = np.array([list(conf.GetAtomPosition(i)) for i in range(n)])\n\nM1=(P[1]+P[2])/2; M2=(P[5]+P[6])/2; O=(M1+M2)/2\nv=M2-M1; dMM=np.linalg.norm(v); v/=dMM\nB=P[[0,3,4,7]].mean(axis=0)\n\nalpha=np.radians(125); sa,ca=np.sin(alpha),np.cos(alpha)\ndef leg(b):\n    b=np.radians(b); return np.array([sa*np.cos(b),sa*np.sin(b),ca])\nu1,u2=leg(210),leg(330)\nr_M=dMM/np.linalg.norm(u1-u2)\nM1t,M2t=r_M*u1,r_M*u2; T=(M1t+M2t)/2\nvt=(M2t-M1t); vt/=np.linalg.norm(vt)\n\ndef rot_align(a,b):\n    ax=np.cross(a,b); s=np.linalg.norm(ax); c=np.dot(a,b)\n    if s<1e-12: return np.eye(3)\n    ax/=s; K=np.array([[0,-ax[2],ax[1]],[ax[2],0,-ax[0]],[-ax[1],ax[0],0]])\n    return np.eye(3)+s*K+(1-c)*(K@K)\n\nR1=rot_align(v,vt)\nB1=R1@(B-O)+T\nb=B1-T; b_perp=b-np.dot(b,vt)*vt\nw=T; w_perp=w-np.dot(w,vt)*vt\nR2=rot_align(b_perp/np.linalg.norm(b_perp), w_perp/np.linalg.norm(w_perp))\nPc=(R2@(R1@(P-O).T)).T+T\n\nRu=np.zeros(3)\natoms=[(\"Ru\",Ru)]\n# Cp*\nr_ring=1.208; z_cp=1.85; cc_me=1.50; ch=1.09\nringC=[]; meC=[]\nfor i in range(5):\n    th=np.radians(90+72*i)\n    u_out=np.array([np.cos(th),np.sin(th),0.0])\n    ringC.append(r_ring*u_out+np.array([0,0,z_cp])); meC.append((r_ring+cc_me)*u_out+np.array([0,0,z_cp]))\nfor rc in ringC: atoms.append((\"C\",rc))\nfor mc in meC: atoms.append((\"C\",mc))\nfor i in range(5):\n    th=np.radians(90+72*i)\n    u_in=-np.array([np.cos(th),np.sin(th),0.0]); t_hat=np.array([-np.sin(th),np.cos(th),0.0]); z_hat=np.array([0.,0.,1.])\n    for phi in (0,120,240):\n        p=np.cos(np.radians(phi))*t_hat+np.sin(np.radians(phi))*z_hat\n        d=(-1/3)*u_in+(2*np.sqrt(2)/3)*p; d/=np.linalg.norm(d)\n        atoms.append((\"H\", meC[i]+ch*d))\nCl=2.42*leg(90); atoms.append((\"Cl\",Cl))\n# cod\nfor s_,p_ in zip(syms,Pc): atoms.append((s_,p_))\n\nwith open(\"guess2.xyz\",\"w\") as f:\n    f.write(f\"{len(atoms)}\\nCp*Ru(cod)Cl docked\\n\")\n    for el,p in atoms: f.write(f\"{el:2s} {p[0]:12.6f} {p[1]:12.6f} {p[2]:12.6f}\\n\")\nprint(\"atoms:\", len(atoms))\nimport itertools\nC=np.array([p for _,p in atoms]); E=[e for e,_ in atoms]\nbad=[]\nfor i,j in itertools.combinations(range(len(E)),2):\n    dd=np.linalg.norm(C[i]-C[j])\n    if (E[i]==\"H\" and E[j]==\"H\" and dd<1.7) or (dd<1.5 and not(E[i]==\"H\" and E[j]==\"H\")):\n        bad.append((E[i],i,E[j],j,round(dd,3)))\nprint(\"close contacts:\", bad)\nd=lambda a,b: np.linalg.norm(a-b)\nprint(\"Ru-Cl:\",round(d(Ru,Cl),3),\" Ru-cod sp2:\",[round(d(Ru,Pc[k]),3) for k in (1,2,5,6)])\nEOF\npython3 assemble2.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 37547,
+   "output_tokens": 2457,
+   "total_tokens": 40004
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "atoms: 47\nclose contacts: [('C', 1, 'C', 2, np.float64(1.42)), ('C', 1, 'C', 5, np.float64(1.42)), ('C', 2, 'C', 3, np.float64(1.42)), ('C', 3, 'C', 4, np.float64(1.42)), ('C', 4, 'C', 5, np.float64(1.42)), ('C', 6, 'H', 11, np.float64(1.09)), ('C', 6, 'H', 12, np.float64(1.09)), ('C', 6, 'H', 13, np.float64(1.09)), ('C', 7, 'H', 14, np.float64(1.09)), ('C', 7, 'H', 15, np.float64(1.09)), ('C', 7, 'H', 16, np.float64(1.09)), ('C', 8, 'H', 17, np.float64(1.09)), ('C', 8, 'H', 18, np.float64(1.09)), ('C', 8, 'H', 19, np.float64(1.09)), ('C', 9, 'H', 20, np.float64(1.09)), ('C', 9, 'H', 21, np.float64(1.09)), ('C', 9, 'H', 22, np.float64(1.09)), ('C', 10, 'H', 23, np.float64(1.09)), ('C', 10, 'H', 24, np.float64(1.09)), ('C', 10, 'H', 25, np.float64(1.09)), ('H', 19, 'H', 37, np.float64(1.322)), ('H', 22, 'H', 46, np.float64(1.048)), ('Cl', 26, 'H', 40, np.float64(1.14)), ('C', 27, 'H', 35, np.float64(1.093)), ('C', 27, 'H', 36, np.float64(1.099)), ('C', 28, 'C', 29, np.float64(1.342)), ('C', 28, 'H', 37, np.float64(1.09)), ('C', 29, 'H', 38, np.float64(1.091)), ('C', 30, 'H', 39, np.float64(1.097)), ('C', 30, 'H', 40, np.float64(1.099)), ('C', 31, 'H', 41, np.float64(1.093)), ('C', 31, 'H', 42, np.float64(1.099)), ('C', 32, 'C', 33, np.float64(1.342)), ('C', 32, 'H', 43, np.float64(1.09)), ('C', 33, 'H', 44, np.float64(1.091)), ('C', 34, 'H', 45, np.float64(1.097)), ('C', 34, 'H', 46, np.float64(1.099))]\nRu-Cl: 2.42  Ru-cod sp2: [np.float64(2.437), np.float64(2.286), np.float64(2.437), np.float64(2.286)]\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:14"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "view_molecule",
+    "args": {
+     "xyz_file_relative_path": "guess2.xyz",
+     "left_right_deg": 90,
+     "up_down_deg": 25,
+     "reset_view": true
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 40829,
+   "output_tokens": 1415,
+   "total_tokens": 42244
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[image]",
+  "name": "view_molecule",
+  "tool_call_id": "view_molecule:15"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python3 << 'EOF'\nimport numpy as np\nlines = open(\"guess2.xyz\").read().splitlines()\nn = int(lines[0])\nE, C = [], []\nfor ln in lines[2:2+n]:\n    p = ln.split(); E.append(p[0]); C.append([float(x) for x in p[1:4]])\nC = np.array(C)\nRu = C[0]; Cl = C[26]\nprint(\"Ru:\", Ru, \"Cl:\", Cl)\n# cod heavy atoms: assembly 27..34 = RDKit 0..7\nfor k in range(8):\n    print(f\"cod C{k} (asm {27+k}):\", np.round(C[27+k],3))\n# bridge center\nB = C[[27,30,31,34]].mean(axis=0)\nprint(\"bridge center:\", np.round(B,3))\n# midpoints\nM1 = (C[28]+C[29])/2; M2=(C[32]+C[33])/2\nprint(\"M1:\", np.round(M1,3), \"M2:\", np.round(M2,3))\n# sp2 carbons distance from Ru\nfor k in (1,2,5,6):\n    print(f\"Ru-C{k}:\", round(np.linalg.norm(C[27+k]-Ru),3))\n# z values\nprint(\"cod C z:\", [round(C[27+k][2],2) for k in range(8)])\nprint(\"cod C y:\", [round(C[27+k][1],2) for k in range(8)])\n# which cod atoms near Cl and near methyls\nfor k in range(8):\n    print(f\"C{k} dist to Cl:\", round(np.linalg.norm(C[27+k]-Cl),3))\nEOF"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 43620,
+   "output_tokens": 2938,
+   "total_tokens": 46558
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "Ru: [0. 0. 0.] Cl: [ 0.        1.982348 -1.388055]\ncod C0 (asm 27): [-0.627 -2.656 -1.292]\ncod C1 (asm 28): [-1.591 -1.538 -1.02 ]\ncod C2 (asm 29): [-1.623 -0.318 -1.579]\ncod C3 (asm 30): [-0.695  0.326 -2.576]\ncod C4 (asm 31): [ 0.627 -0.36  -2.931]\ncod C5 (asm 32): [ 1.591 -0.466 -1.786]\ncod C6 (asm 33): [ 1.623 -1.39  -0.813]\ncod C7 (asm 34): [ 0.695 -2.542 -0.528]\nbridge center: [-0.    -1.308 -1.831]\nM1: [-1.607 -0.928 -1.299] M2: [ 1.607 -0.928 -1.299]\nRu-C1: 2.437\nRu-C2: 2.286\nRu-C5: 2.437\nRu-C6: 2.286\ncod C z: [np.float64(-1.29), np.float64(-1.02), np.float64(-1.58), np.float64(-2.58), np.float64(-2.93), np.float64(-1.79), np.float64(-0.81), np.float64(-0.53)]\ncod C y: [np.float64(-2.66), np.float64(-1.54), np.float64(-0.32), np.float64(0.33), np.float64(-0.36), np.float64(-0.47), np.float64(-1.39), np.float64(-2.54)]\nC0 dist to Cl: 4.681\nC1 dist to Cl: 3.881\nC2 dist to Cl: 2.821\nC3 dist to Cl: 2.153\nC4 dist to Cl: 2.874\nC5 dist to Cl: 2.947\nC6 dist to Cl: 3.786\nC7 dist to Cl: 4.658\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:16"
+ },
+ {
+  "type": "AIMessage",
+  "content": "Let me examine the free cod conformer shape directly to understand the docking problem:",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python3 << 'EOF'\nimport numpy as np\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem\nmol = Chem.MolFromSmiles(r\"C1/C=C\\CC/C=C\\C1\")\nmol = Chem.AddHs(mol)\nps = AllChem.ETKDGv3(); ps.randomSeed = 42\nAllChem.EmbedMultipleConfs(mol, numConfs=30, params=ps)\nAllChem.MMFFOptimizeMoleculeConfs(mol, maxIters=500)\nconf = mol.GetConformer(24)\nn = mol.GetNumAtoms()\nwith open(\"cod24.xyz\",\"w\") as f:\n    f.write(f\"{n}\\ncod conformer 24\\n\")\n    for i in range(n):\n        a = mol.GetAtomWithIdx(i); p = conf.GetAtomPosition(i)\n        f.write(f\"{a.GetSymbol():2s} {p.x:12.6f} {p.y:12.6f} {p.z:12.6f}\\n\")\nP = np.array([list(conf.GetAtomPosition(i)) for i in range(n)])\nprint(\"double bond atoms 1,2:\", np.round(P[1],3), np.round(P[2],3))\nprint(\"double bond atoms 5,6:\", np.round(P[5],3), np.round(P[6],3))\nprint(\"CH2 0:\", np.round(P[0],3), \" 3:\", np.round(P[3],3), \" 4:\", np.round(P[4],3), \" 7:\", np.round(P[7],3))\n# mean plane of 4 sp2 carbons, and which side the bridges are on\nsp2 = P[[1,2,5,6]]\nc = sp2.mean(axis=0)\nu,s,vt = np.linalg.svd(sp2-c)\nnrm = vt[2]\nprint(\"spread along normal:\", s)\nfor k in (0,3,4,7):\n    print(f\"C{k} side:\", round(np.dot(P[k]-c, nrm),3))\nEOF"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 47103,
+   "output_tokens": 5717,
+   "total_tokens": 52820
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "double bond atoms 1,2: [-0.61  -1.568 -0.448] [ 0.711 -1.535 -0.682]\ndouble bond atoms 5,6: [ 0.617  1.627 -0.061] [-0.697  1.653 -0.333]\nCH2 0: [-1.401 -0.73   0.514]  3: [ 1.782 -0.636 -0.122]  4: [1.384 0.589 0.706]  7: [-1.78   0.652 -0.023]\nspread along normal: [3.21403559 1.31742406 0.25449754]\nC0 side: -0.998\nC3 side: -0.31\nC4 side: -0.998\nC7 side: -0.31\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:17"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > build3.py << 'EOF'\nimport numpy as np\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem\nfrom rdkit.Geometry import Point3D\n\n# ---------------- cod heavy skeleton (bound geometry, correct topology) ----------------\nalpha = np.radians(125); sa, ca = np.sin(alpha), np.cos(alpha)\ndef leg(beta_deg, dist):\n    b = np.radians(beta_deg)\n    return dist*np.array([sa*np.cos(b), sa*np.sin(b), ca])\nM1 = leg(210, 2.05); M2 = leg(330, 2.05)\nm1 = M1/np.linalg.norm(M1); m2 = M2/np.linalg.norm(M2)\nn = np.cross(m1, m2); n /= np.linalg.norm(n)\nh = 0.70\nC1 = M1 - h*n; C2 = M1 + h*n; C5 = M2 + h*n; C6 = M2 - h*n\ndef bridge(P, Q):\n    mid = 0.5*(P+Q); e = mid/np.linalg.norm(mid)\n    a = 0.77; xdir = (Q-P)/np.linalg.norm(Q-P)\n    dx = np.linalg.norm(Q-P)/2 - a\n    b = np.sqrt(1.54**2 - dx**2)\n    return mid - a*xdir + b*e, mid + a*xdir + b*e\nC3, C4 = bridge(C2, C5)\nC8, C7 = bridge(C1, C6)\ncodC = [C1,C2,C3,C4,C5,C6,C7,C8]\n\n# ---------------- RDKit cod with fixed heavy-atom positions ----------------\nmol = Chem.RWMol()\nfor _ in range(8): mol.AddAtom(Chem.Atom(\"C\"))\nbonds = [(0,1,2),(1,2,1),(2,3,1),(3,4,1),(4,5,2),(5,6,1),(6,7,1),(7,0,1)]  # (a,b,order) C1=C2...C5=C6\nfor a,b,o in bonds:\n    mol.AddBond(a,b,Chem.BondType.DOUBLE if o==2 else Chem.BondType.SINGLE)\nmol = mol.GetMol()\nmol = Chem.AddHs(mol)\nps = AllChem.ETKDGv3(); ps.randomSeed=7; ps.useBasicKnowledge=False; ps.useExpTorsionAnglePrefs=False\ncmap = {i: Point3D(*codC[i]) for i in range(8)}\nps.SetCoordMap(cmap)\nok = AllChem.EmbedMolecule(mol, ps)\nprint(\"embed status:\", ok)\n# optimize only H positions with heavy atoms fixed\nmp = AllChem.MMFFGetMoleculeProperties(mol)\nff = AllChem.MMFFGetMoleculeForceField(mol, mp)\nfor i in range(8): ff.AddFixedPoint(i)\nff.Minimize(maxIts=2000)\nconf = mol.GetConformer()\ncod = []\nfor i in range(mol.GetNumAtoms()):\n    p = conf.GetAtomPosition(i)\n    cod.append((mol.GetAtomWithIdx(i).GetSymbol(), np.array([p.x,p.y,p.z])))\n# cod order: C1..C8 then H's\n\n# ---------------- Cp* + Ru + Cl ----------------\nRu = np.zeros(3)\nr_ring=1.208; z_cp=1.85; cc_me=1.50; ch=1.09\nringC=[]; meC=[]\nfor i in range(5):\n    th=np.radians(90+72*i)\n    u_out=np.array([np.cos(th),np.sin(th),0.0])\n    ringC.append(r_ring*u_out+np.array([0,0,z_cp])); meC.append((r_ring+cc_me)*u_out+np.array([0,0,z_cp]))\nCl = leg(90, 2.42)\n\n# methyl H's: choose phi offset minimizing clash with cod atoms\ncodpos = np.array([p for _,p in cod])\ndef methyl_Hs(i, off):\n    th=np.radians(90+72*i)\n    u_in=-np.array([np.cos(th),np.sin(th),0.0]); t_hat=np.array([-np.sin(th),np.cos(th),0.0]); z_hat=np.array([0.,0.,1.])\n    Hs=[]\n    for phi in (off, off+120, off+240):\n        p=np.cos(np.radians(phi))*t_hat+np.sin(np.radians(phi))*z_hat\n        d=(-1/3)*u_in+(2*np.sqrt(2)/3)*p; d/=np.linalg.norm(d)\n        Hs.append(meC[i]+ch*d)\n    return Hs\nmeH=[]\nfor i in range(5):\n    best=None\n    for off in range(0,120,10):\n        Hs=methyl_Hs(i,off)\n        mind=min(np.linalg.norm(Hp-cp) for Hp in Hs for cp in codpos)\n        if best is None or mind>best[0]: best=(mind,off,Hs)\n    meH+= best[2]\n    print(f\"methyl {i}: best offset {best[1]} deg, min H-cod dist {round(best[0],3)}\")\n\n# ---------------- assemble ----------------\natoms=[(\"Ru\",Ru)]\nfor rc in ringC: atoms.append((\"C\",rc))\nfor mc in meC: atoms.append((\"C\",mc))\nfor hp in meH: atoms.append((\"H\",hp))\natoms.append((\"Cl\",Cl))\natoms += cod\nwith open(\"guess3.xyz\",\"w\") as f:\n    f.write(f\"{len(atoms)}\\nCp*Ru(cod)Cl v3\\n\")\n    for el,p in atoms: f.write(f\"{el:2s} {p[0]:12.6f} {p[1]:12.6f} {p[2]:12.6f}\\n\")\nprint(\"atoms:\", len(atoms))\nimport itertools\nC=np.array([p for _,p in atoms]); E=[e for e,_ in atoms]\nbad=[]\nfor i,j in itertools.combinations(range(len(E)),2):\n    dd=np.linalg.norm(C[i]-C[j])\n    if (E[i]==\"H\" and E[j]==\"H\" and dd<1.7): bad.append((E[i],i,E[j],j,round(dd,3)))\n    elif not(E[i]==\"H\" and E[j]==\"H\") and dd<1.6 and abs(i-j)>0:\n        # ignore true bonds\n        if dd<1.6: bad.append((E[i],i,E[j],j,round(dd,3)))\nbad2=[b for b in bad if b[4]<1.6]\nprint(\"bad contacts <1.6:\", bad2)\nprint(\"worst H-H:\", min((np.linalg.norm(C[i]-C[j]),i,j) for i,j in itertools.combinations(range(len(E)),2) if E[i]==\"H\" and E[j]==\"H\"))\nEOF\npython3 build3.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 53054,
+   "output_tokens": 9964,
+   "total_tokens": 63018
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[03:23:08] \n\n****\nPre-condition Violation\ngetNumImplicitHs() called without preceding call to calcImplicitValence()\nViolation occurred on line 302 in file /home/conda/feedstock_root/build_artifacts/rdkit-meta_1774625995418/work/Code/GraphMol/Atom.cpp\nFailed Expression: d_implicitValence > -1\n----------\nStacktrace:\n 0# Invar::Invariant::toString[abi:cxx11]() const in /h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/rdkit/../../../libRDKitRDGeneral.so.1\n 1# Invar::operator<<(std::ostream&, Invar::Invariant const&) in /h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/rdkit/../../../libRDKitRDGeneral.so.1\n 2# RDKit::Atom::getNumImplicitHs() const in /h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/rdkit/Chem/../../../../libRDKitGraphMol.so.1\n 3# RDKit::MolOps::addHs(RDKit::RWMol&, RDKit::MolOps::AddHsParameters const&, std::vector<unsigned int, std::allocator<unsigned int> > const*) in /h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/rdkit/Chem/../../../../libRDKitGraphMol.so.1\n 4# RDKit::addHs2(RDKit::ROMol const&, RDKit::MolOps::AddHsParameters, boost::python::api::object) in /h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/rdkit/Chem/rdmolops.so\n 5# RDKit::addHs(RDKit::ROMol const&, bool, bool, boost::python::api::object, bool) in /h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/rdkit/Chem/rdmolops.so\n 6# 0x00007FC2DE32F878 in /h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/rdkit/Chem/rdmolops.so\n 7# boost::python::objects::function::call(_object*, _object*) const in /h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/rdkit/../../../libboost_python312.so.1.86.0\n 8# 0x00007FC2E22AD779 in /h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/rdkit/../../../libboost_python312.so.1.86.0\n 9# boost::python::detail::exception_handler::operator()(boost::function_n<void> const&) const in /h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/rdkit/../../../libboost_python312.so.1.86.0\n10# 0x00007FC2DD56CA64 in /h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/rdkit/Chem/rdSLNParse.so\n11# 0x00007FC2DD9889C4 in /h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/rdkit/Chem/rdDepictor.so\n12# 0x00007FC2DDD2BC64 in /h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/rdkit/Chem/rdChemReactions.so\n13# 0x00007FC2DDD2BCB4 in /h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/rdkit/Chem/rdChemReactions.so\n14# 0x00007FC2DDED2654 in /h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/rdkit/Chem/rdMolChemicalFeatures.so\n15# 0x00007FC2DECBCA54 in /h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/rdkit/Chem/rdmolfiles.so\n16# 0x00007FC2DECBCAA4 in /h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/rdkit/Chem/rdmolfiles.so\n17# 0x00007FC2E4A71874 in /h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/rdkit/Chem/rdCIPLabeler.so\n18# 0x00007FC2DF70E3A4 in /h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/rdkit/Chem/rdchem.so\n19# 0x00007FC2DF69F7F0 in /h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/rdkit/Chem/rdchem.so\n20# 0x00007FC2DF69F3C0 in /h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/rdkit/Chem/rdchem.so\n21# 0x00007FC2DF69EF90 in /h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/rdkit/Chem/rdchem.so\n22# 0x00007FC2DF69EB60 in /h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/rdkit/Chem/rdchem.so\n23# 0x00007FC2DF69E730 in /h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/rdkit/Chem/rdchem.so\n24# 0x00007FC2E23497C4 in /h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/rdkit/rdBase.so\n25# 0x00007FC2E2349814 in /h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/rdkit/rdBase.so\n26# 0x00007FC2E2349864 in /h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/rdkit/rdBase.so\n27# 0x00007FC2E23498B4 in /h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/rdkit/rdBase.so\n28# boost::python::handle_exception_impl(boost::function_n<void>) in /h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/rdkit/../../../libboost_python312.so.1.86.0\n29# 0x00007FC2E22AA3B3 in /h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/rdkit/../../../libboost_python312.so.1.86.0\n30# _PyObject_MakeTpCall in python3\n31# 0x00005651B0E5B7E4 in python3\n32# PyEval_EvalCode in python3\n33# 0x00005651B10289BA in python3\n34# 0x00005651B10239C5 in python3\n35# 0x00005651B103C2D0 in python3\n36# _PyRun_SimpleFileObject in python3\n37# _PyRun_AnyFileObject in python3\n38# Py_RunMain in python3\n39# Py_BytesMain in python3\n40# 0x00007FC2E7A0AD90 in /lib/x86_64-linux-gnu/libc.so.6\n41# __libc_start_main in /lib/x86_64-linux-gnu/libc.so.6\n42# 0x00005651B0FEE321 in python3\n----------\n****\n\nTraceback (most recent call last):\n  File \"/h/400/skaxu/elagenteworkdir/mol_0211_8314f5f8_kimi-k3/build3.py\", line 33, in <module>\n    mol = Chem.AddHs(mol)\n          ^^^^^^^^^^^^^^^\nRuntimeError: Pre-condition Violation\n\tgetNumImplicitHs() called without preceding call to calcImplicitValence()\n\tViolation occurred on line 302 in file Code/GraphMol/Atom.cpp\n\tFailed Expression: d_implicitValence > -1\n\tRDKIT: 2026.03.1\n\tBOOST: \n\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:18"
+ },
+ {
+  "type": "AIMessage",
+  "content": "Just an RDKit API issue \u2014 need `UpdatePropertyCache` before `AddHs`. Quick fix:",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python3 - << 'EOF'\nimport re\ns = open(\"build3.py\").read()\ns = s.replace(\"mol = mol.GetMol()\\nmol = Chem.AddHs(mol)\",\n              \"mol = mol.GetMol()\\nmol.UpdatePropertyCache(strict=False)\\nChem.SanitizeMol(mol)\\nmol = Chem.AddHs(mol)\")\nopen(\"build3.py\",\"w\").write(s)\nprint(\"patched\")\nEOF\npython3 build3.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 65094,
+   "output_tokens": 218,
+   "total_tokens": 65312
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "patched\nembed status: 0\nmethyl 0: best offset 30 deg, min H-cod dist 1.691\nmethyl 1: best offset 110 deg, min H-cod dist 1.546\nmethyl 2: best offset 100 deg, min H-cod dist 1.023\nmethyl 3: best offset 60 deg, min H-cod dist 1.068\nmethyl 4: best offset 90 deg, min H-cod dist 1.591\natoms: 47\nbad contacts <1.6: [('Ru', 0, 'C', 29, np.float64(1.563)), ('Ru', 0, 'C', 34, np.float64(1.567)), ('C', 1, 'C', 2, np.float64(1.42)), ('C', 1, 'C', 5, np.float64(1.42)), ('C', 1, 'C', 6, np.float64(1.5)), ('C', 1, 'C', 27, np.float64(1.188)), ('C', 1, 'C', 28, np.float64(1.1)), ('C', 1, 'H', 35, np.float64(1.36)), ('C', 1, 'H', 36, np.float64(1.214)), ('C', 2, 'C', 3, np.float64(1.42)), ('C', 2, 'C', 7, np.float64(1.5)), ('C', 2, 'C', 27, np.float64(1.373)), ('C', 2, 'H', 35, np.float64(1.209)), ('C', 3, 'C', 4, np.float64(1.42)), ('C', 3, 'C', 8, np.float64(1.5)), ('C', 4, 'C', 5, np.float64(1.42)), ('C', 4, 'C', 9, np.float64(1.5)), ('C', 4, 'H', 41, np.float64(1.588)), ('C', 5, 'C', 10, np.float64(1.5)), ('C', 5, 'C', 28, np.float64(1.296)), ('C', 5, 'H', 36, np.float64(1.104)), ('C', 6, 'H', 11, np.float64(1.09)), ('C', 6, 'H', 12, np.float64(1.09)), ('C', 6, 'H', 13, np.float64(1.09)), ('C', 7, 'H', 14, np.float64(1.09)), ('C', 7, 'H', 15, np.float64(1.09)), ('C', 7, 'H', 16, np.float64(1.09)), ('C', 7, 'H', 35, np.float64(1.469)), ('C', 8, 'H', 17, np.float64(1.09)), ('C', 8, 'H', 18, np.float64(1.09)), ('C', 8, 'H', 19, np.float64(1.09)), ('C', 8, 'H', 42, np.float64(0.895)), ('C', 9, 'H', 20, np.float64(1.09)), ('C', 9, 'H', 21, np.float64(1.09)), ('C', 9, 'H', 22, np.float64(1.09)), ('C', 9, 'H', 41, np.float64(0.887)), ('C', 10, 'H', 23, np.float64(1.09)), ('C', 10, 'H', 24, np.float64(1.09)), ('C', 10, 'H', 25, np.float64(1.09)), ('C', 10, 'H', 36, np.float64(1.532)), ('H', 15, 'H', 35, np.float64(1.555)), ('H', 15, 'H', 45, np.float64(1.546)), ('H', 18, 'H', 42, np.float64(1.1)), ('H', 19, 'H', 42, np.float64(1.023)), ('H', 21, 'H', 41, np.float64(1.068)), ('H', 22, 'H', 41, np.float64(1.127)), ('H', 25, 'H', 36, np.float64(1.591)), ('Cl', 26, 'H', 38, np.float64(1.397)), ('Cl', 26, 'H', 46, np.float64(1.1)), ('C', 27, 'C', 28, np.float64(1.357)), ('C', 27, 'C', 34, np.float64(1.473)), ('C', 27, 'H', 35, np.float64(1.084)), ('C', 28, 'C', 29, np.float64(1.477)), ('C', 28, 'H', 36, np.float64(1.084)), ('C', 29, 'C', 30, np.float64(1.507)), ('C', 29, 'H', 37, np.float64(1.101)), ('C', 29, 'H', 38, np.float64(1.097)), ('C', 30, 'C', 31, np.float64(1.494)), ('C', 30, 'H', 39, np.float64(1.101)), ('C', 30, 'H', 40, np.float64(1.097)), ('C', 31, 'C', 32, np.float64(1.351)), ('C', 31, 'H', 41, np.float64(1.084)), ('C', 32, 'C', 33, np.float64(1.492)), ('C', 32, 'H', 42, np.float64(1.084)), ('C', 33, 'C', 34, np.float64(1.513)), ('C', 33, 'H', 43, np.float64(1.098)), ('C', 33, 'H', 44, np.float64(1.102)), ('C', 34, 'H', 45, np.float64(1.101)), ('C', 34, 'H', 46, np.float64(1.097))]\nworst H-H: (np.float64(1.0227618353938117), 19, 42)\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:19"
+ },
+ {
+  "type": "AIMessage",
+  "content": "The RDKit embed ignored my fixed coordinates (cod atoms landed on top of Ru/Cp*). Let me debug the `coordMap` usage:",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python3 << 'EOF'\nimport numpy as np\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem\nfrom rdkit.Geometry import Point3D\n\nmol = Chem.RWMol()\nfor _ in range(8): mol.AddAtom(Chem.Atom(\"C\"))\nfor a,b,o in [(0,1,2),(1,2,1),(2,3,1),(3,4,1),(4,5,2),(5,6,1),(6,7,1),(7,0,1)]:\n    mol.AddBond(a,b,Chem.BondType.DOUBLE if o==2 else Chem.BondType.SINGLE)\nmol = mol.GetMol(); mol.UpdatePropertyCache(strict=False); Chem.SanitizeMol(mol)\nmol = Chem.AddHs(mol)\ntarget = np.array([[ -1.454,-0.270,-1.583],[-1.454,-1.409,-0.769],[-0.77,-2.62,-1.43],[0.77,-2.62,-1.43],\n                   [1.454,-1.409,-0.769],[1.454,-0.270,-1.583],[0.77,-0.50,-2.94],[-0.77,-0.50,-2.94]])\nps = AllChem.ETKDGv3()\nprint(\"has coordMap:\", hasattr(ps,'coordMap'), \"| has SetCoordMap:\", hasattr(ps,'SetCoordMap'))\n# try attribute assignment\ncmap = {i: Point3D(*target[i]) for i in range(8)}\ntry:\n    ps.SetCoordMap(cmap)\n    print(\"SetCoordMap ok\")\nexcept Exception as e:\n    print(\"SetCoordMap failed:\", e)\n    ps.coordMap = cmap\nok = AllChem.EmbedMolecule(mol, ps)\nconf = mol.GetConformer()\nP = np.array([list(conf.GetAtomPosition(i)) for i in range(8)])\nprint(\"embed status:\", ok)\nprint(\"heavy atom deviation from target:\", np.round(np.linalg.norm(P-target,axis=1),3))\nEOF"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 66873,
+   "output_tokens": 1241,
+   "total_tokens": 68114
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "has coordMap: False | has SetCoordMap: True\nSetCoordMap ok\nembed status: 0\nheavy atom deviation from target: [3.49  3.453 3.678 3.272 2.815 2.802 2.589 3.226]\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:20"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > build4.py << 'EOF'\nimport numpy as np\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem\nfrom rdkit.Geometry import Point3D\n\n# ---------------- cod heavy skeleton (bound geometry) ----------------\nalpha = np.radians(125); sa, ca = np.sin(alpha), np.cos(alpha)\ndef leg(beta_deg, dist):\n    b = np.radians(beta_deg)\n    return dist*np.array([sa*np.cos(b), sa*np.sin(b), ca])\nM1 = leg(210, 2.05); M2 = leg(330, 2.05)\nm1 = M1/np.linalg.norm(M1); m2 = M2/np.linalg.norm(M2)\nn = np.cross(m1, m2); n /= np.linalg.norm(n)\nh = 0.70\nC1 = M1 - h*n; C2 = M1 + h*n; C5 = M2 + h*n; C6 = M2 - h*n\ndef bridge(P, Q):\n    mid = 0.5*(P+Q); e = mid/np.linalg.norm(mid)\n    a = 0.77; xdir = (Q-P)/np.linalg.norm(Q-P)\n    dx = np.linalg.norm(Q-P)/2 - a\n    b = np.sqrt(1.54**2 - dx**2)\n    return mid - a*xdir + b*e, mid + a*xdir + b*e\nC3, C4 = bridge(C2, C5)\nC8, C7 = bridge(C1, C6)\ncodC = [C1,C2,C3,C4,C5,C6,C7,C8]\n\n# approximate H positions (initial guess for MMFF)\ndef sp2_H(C,A,B,d=1.08):\n    u1=(A-C)/np.linalg.norm(A-C); u2=(B-C)/np.linalg.norm(B-C)\n    hh=-(u1+u2); hh/=np.linalg.norm(hh); return C+d*hh\ndef sp3_H2(C,A,B,d=1.09):\n    u1=(A-C)/np.linalg.norm(A-C); u2=(B-C)/np.linalg.norm(B-C)\n    m=-(u1+u2); m/=np.linalg.norm(m); w=np.cross(u1,u2); w/=np.linalg.norm(w)\n    return C+d*(-0.5774*m+0.8165*w), C+d*(-0.5774*m-0.8165*w)\nHs_init = []\nHs_init.append(sp2_H(C1,C2,C8)); Hs_init.append(sp2_H(C2,C1,C3))\nHs_init.append(sp2_H(C5,C6,C4)); Hs_init.append(sp2_H(C6,C5,C7))\nfor Cc,Aa,Bb in [(C3,C2,C4),(C4,C3,C5),(C7,C6,C8),(C8,C1,C7)]:\n    h1,h2 = sp3_H2(Cc,Aa,Bb); Hs_init += [h1,h2]\n\n# ---------------- RDKit cod mol ----------------\nmol = Chem.RWMol()\nfor _ in range(8): mol.AddAtom(Chem.Atom(\"C\"))\nfor a,b,o in [(0,1,2),(1,2,1),(2,3,1),(3,4,1),(4,5,2),(5,6,1),(6,7,1),(7,0,1)]:\n    mol.AddBond(a,b,Chem.BondType.DOUBLE if o==2 else Chem.BondType.SINGLE)\nmol = mol.GetMol(); mol.UpdatePropertyCache(strict=False); Chem.SanitizeMol(mol)\nmol = Chem.AddHs(mol)\nnh = mol.GetNumAtoms()  # 20\nconf = Chem.Conformer(nh)\nallpos = codC + Hs_init\nfor i,p in enumerate(allpos):\n    conf.SetAtomPosition(i, Point3D(*p))\nmol.RemoveAllConformers(); mol.AddConformer(conf)\n# embed H's better: run a quick distance-geometry? Instead go straight to MMFF with restraints\nmp = AllChem.MMFFGetMoleculeProperties(mol)\nff = AllChem.MMFFGetMoleculeForceField(mol, mp)\nfor i in range(8):\n    ff.AddPositionConstraint(i, 0.05, 200.0)   # heavy atoms pinned\nff.Initialize()\nff.Minimize(maxIts=5000)\nconf = mol.GetConformer()\nP = np.array([list(conf.GetAtomPosition(i)) for i in range(nh)])\n# report\nd = lambda a,b: np.linalg.norm(a-b)\nprint(\"heavy atom drift:\", [round(d(P[i],codC[i]),3) for i in range(8)])\nhh = []\nfor i in range(8,nh):\n    for j in range(i+1,nh):\n        dd = d(P[i],P[j])\n        if dd < 2.0: hh.append((i,j,round(dd,3)))\nprint(\"H-H < 2.0:\", hh)\nprint(\"C-H bonds:\", [round(d(P[i],P[j]),3) for i,j in [(0,8),(1,9),(4,12),(5,13),(2,10),(3,14),(6,16),(7,18)]])\nwith open(\"cod_fixed.xyz\",\"w\") as f:\n    f.write(f\"{nh}\\ncod H-relaxed\\n\")\n    for i in range(nh):\n        f.write(f\"{mol.GetAtomWithIdx(i).GetSymbol():2s} {P[i][0]:12.6f} {P[i][1]:12.6f} {P[i][2]:12.6f}\\n\")\nprint(\"saved cod_fixed.xyz\")\nEOF\npython3 build4.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 68208,
+   "output_tokens": 6091,
+   "total_tokens": 74299
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "Traceback (most recent call last):\n  File \"/h/400/skaxu/elagenteworkdir/mol_0211_8314f5f8_kimi-k3/build4.py\", line 57, in <module>\n    ff.AddPositionConstraint(i, 0.05, 200.0)   # heavy atoms pinned\n    ^^^^^^^^^^^^^^^^^^^^^^^^\nAttributeError: 'ForceField' object has no attribute 'AddPositionConstraint'. Did you mean: 'UFFAddPositionConstraint'?\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:21"
+ },
+ {
+  "type": "AIMessage",
+  "content": "MMFF force field lacks that method; UFF has it. Let me switch to UFF:",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python3 - << 'EOF'\ns = open(\"build4.py\").read()\ns = s.replace(\"mp = AllChem.MMFFGetMoleculeProperties(mol)\\nff = AllChem.MMFFGetMoleculeForceField(mol, mp)\",\n              \"ff = AllChem.UFFGetMoleculeForceField(mol)\")\ns = s.replace(\"ff.AddPositionConstraint(i, 0.05, 200.0)\", \"ff.UFFAddPositionConstraint(i, 0.05, 300.0)\")\nopen(\"build4.py\",\"w\").write(s)\nprint(\"patched\")\nEOF\npython3 build4.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 74435,
+   "output_tokens": 284,
+   "total_tokens": 74719
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "patched\nheavy atom drift: [np.float64(0.831), np.float64(0.628), np.float64(1.35), np.float64(0.62), np.float64(1.162), np.float64(0.565), np.float64(0.603), np.float64(0.77)]\nH-H < 2.0: [(8, 19, np.float64(1.766)), (10, 11, np.float64(1.111)), (11, 12, np.float64(1.801)), (11, 13, np.float64(1.945)), (12, 13, np.float64(0.341))]\nC-H bonds: [np.float64(1.286), np.float64(1.999), np.float64(1.877), np.float64(2.949), np.float64(1.34), np.float64(2.075), np.float64(1.242), np.float64(2.356)]\nsaved cod_fixed.xyz\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:22"
+ },
+ {
+  "type": "AIMessage",
+  "content": "The H-to-carbon mapping was mismatched between my ordering and RDKit's. Let me fix the ordering and retry:",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > build4.py << 'EOF'\nimport numpy as np\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem\nfrom rdkit.Geometry import Point3D\n\n# ---------------- cod heavy skeleton (bound geometry) ----------------\nalpha = np.radians(125); sa, ca = np.sin(alpha), np.cos(alpha)\ndef leg(beta_deg, dist):\n    b = np.radians(beta_deg)\n    return dist*np.array([sa*np.cos(b), sa*np.sin(b), ca])\nM1 = leg(210, 2.05); M2 = leg(330, 2.05)\nm1 = M1/np.linalg.norm(M1); m2 = M2/np.linalg.norm(M2)\nn = np.cross(m1, m2); n /= np.linalg.norm(n)\nh = 0.70\nC1 = M1 - h*n; C2 = M1 + h*n; C5 = M2 + h*n; C6 = M2 - h*n\ndef bridge(P, Q):\n    mid = 0.5*(P+Q); e = mid/np.linalg.norm(mid)\n    a = 0.77; xdir = (Q-P)/np.linalg.norm(Q-P)\n    dx = np.linalg.norm(Q-P)/2 - a\n    b = np.sqrt(1.54**2 - dx**2)\n    return mid - a*xdir + b*e, mid + a*xdir + b*e\nC3, C4 = bridge(C2, C5)\nC8, C7 = bridge(C1, C6)\ncodC = [C1,C2,C3,C4,C5,C6,C7,C8]\n\ndef sp2_H(C,A,B,d=1.08):\n    u1=(A-C)/np.linalg.norm(A-C); u2=(B-C)/np.linalg.norm(B-C)\n    hh=-(u1+u2); hh/=np.linalg.norm(hh); return C+d*hh\ndef sp3_H2(C,A,B,d=1.09):\n    u1=(A-C)/np.linalg.norm(A-C); u2=(B-C)/np.linalg.norm(B-C)\n    m=-(u1+u2); m/=np.linalg.norm(m); w=np.cross(u1,u2); w/=np.linalg.norm(w)\n    return C+d*(-0.5774*m+0.8165*w), C+d*(-0.5774*m-0.8165*w)\n\n# H order matching RDKit AddHs: C1(H), C2(H), C3(H2), C4(H2), C5(H), C6(H), C7(H2), C8(H2)\nHs_init = [sp2_H(C1,C2,C8), sp2_H(C2,C1,C3)]\nHs_init += list(sp3_H2(C3,C2,C4))\nHs_init += list(sp3_H2(C4,C3,C5))\nHs_init += [sp2_H(C5,C6,C4), sp2_H(C6,C5,C7)]\nHs_init += list(sp3_H2(C7,C6,C8))\nHs_init += list(sp3_H2(C8,C1,C7))\nassert len(Hs_init)==12\n\nmol = Chem.RWMol()\nfor _ in range(8): mol.AddAtom(Chem.Atom(\"C\"))\nfor a,b,o in [(0,1,2),(1,2,1),(2,3,1),(3,4,1),(4,5,2),(5,6,1),(6,7,1),(7,0,1)]:\n    mol.AddBond(a,b,Chem.BondType.DOUBLE if o==2 else Chem.BondType.SINGLE)\nmol = mol.GetMol(); mol.UpdatePropertyCache(strict=False); Chem.SanitizeMol(mol)\nmol = Chem.AddHs(mol)\nnh = mol.GetNumAtoms()\nconf = Chem.Conformer(nh)\nallpos = list(codC) + Hs_init\nfor i,p in enumerate(allpos):\n    conf.SetAtomPosition(i, Point3D(float(p[0]),float(p[1]),float(p[2])))\nmol.RemoveAllConformers(); mol.AddConformer(conf)\nff = AllChem.UFFGetMoleculeForceField(mol)\nfor i in range(8):\n    ff.UFFAddPositionConstraint(i, 0.05, 500.0)\nff.Initialize()\nff.Minimize(maxIts=10000)\nconf = mol.GetConformer()\nP = np.array([list(conf.GetAtomPosition(i)) for i in range(nh)])\nd = lambda a,b: np.linalg.norm(a-b)\nprint(\"heavy atom drift:\", [round(d(P[i],codC[i]),3) for i in range(8)])\nworst=[]\nfor i in range(8,nh):\n    for j in range(i+1,nh):\n        dd=d(P[i],P[j])\n        if dd<2.2: worst.append((i,j,round(dd,3)))\nprint(\"H-H < 2.2:\", worst)\n# C-H bond lengths (RDKit order: C1:8, C2:9, C3:10,11, C4:12,13, C5:14, C6:15, C7:16,17, C8:18,19)\nchbonds=[(0,8),(1,9),(2,10),(2,11),(3,12),(3,13),(4,14),(5,15),(6,16),(6,17),(7,18),(7,19)]\nprint(\"C-H:\", [round(d(P[a],P[b]),3) for a,b in chbonds])\nwith open(\"cod_fixed.xyz\",\"w\") as f:\n    f.write(f\"{nh}\\ncod H-relaxed\\n\")\n    for i in range(nh):\n        f.write(f\"{mol.GetAtomWithIdx(i).GetSymbol():2s} {P[i][0]:12.6f} {P[i][1]:12.6f} {P[i][2]:12.6f}\\n\")\nprint(\"saved cod_fixed.xyz\")\nEOF\npython3 build4.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 74973,
+   "output_tokens": 2521,
+   "total_tokens": 77494
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "heavy atom drift: [np.float64(0.074), np.float64(0.074), np.float64(0.117), np.float64(0.117), np.float64(0.074), np.float64(0.074), np.float64(0.117), np.float64(0.117)]\nH-H < 2.2: [(10, 11, np.float64(1.749)), (11, 18, np.float64(2.179)), (12, 13, np.float64(1.749)), (12, 16, np.float64(2.179)), (16, 17, np.float64(1.749)), (18, 19, np.float64(1.749))]\nC-H: [np.float64(1.086), np.float64(1.086), np.float64(1.112), np.float64(1.109), np.float64(1.109), np.float64(1.112), np.float64(1.086), np.float64(1.086), np.float64(1.109), np.float64(1.112), np.float64(1.109), np.float64(1.112)]\nsaved cod_fixed.xyz\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:23"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > build5.py << 'EOF'\nimport numpy as np\n\n# load relaxed cod\nlines = open(\"cod_fixed.xyz\").read().splitlines()\nn = int(lines[0]); codE=[]; codP=[]\nfor ln in lines[2:2+n]:\n    p=ln.split(); codE.append(p[0]); codP.append([float(x) for x in p[1:4]])\ncodP = np.array(codP)\n\nalpha = np.radians(125); sa, ca = np.sin(alpha), np.cos(alpha)\ndef leg(beta_deg, dist):\n    b = np.radians(beta_deg)\n    return dist*np.array([sa*np.cos(b), sa*np.sin(b), ca])\n\nRu = np.zeros(3)\nr_ring=1.208; z_cp=1.85; cc_me=1.50; ch=1.09\nringC=[]; meC=[]\nfor i in range(5):\n    th=np.radians(90+72*i)\n    u_out=np.array([np.cos(th),np.sin(th),0.0])\n    ringC.append(r_ring*u_out+np.array([0,0,z_cp])); meC.append((r_ring+cc_me)*u_out+np.array([0,0,z_cp]))\nCl = leg(90, 2.42)\n\ndef methyl_Hs(i, off):\n    th=np.radians(90+72*i)\n    u_in=-np.array([np.cos(th),np.sin(th),0.0]); t_hat=np.array([-np.sin(th),np.cos(th),0.0]); z_hat=np.array([0.,0.,1.])\n    Hs=[]\n    for phi in (off, off+120, off+240):\n        p=np.cos(np.radians(phi))*t_hat+np.sin(np.radians(phi))*z_hat\n        d=(-1/3)*u_in+(2*np.sqrt(2)/3)*p; d/=np.linalg.norm(d)\n        Hs.append(meC[i]+ch*d)\n    return Hs\nmeH=[]\nfor i in range(5):\n    best=None\n    for off in range(0,120,5):\n        Hs=methyl_Hs(i,off)\n        mind=min(np.linalg.norm(Hp-cp) for Hp in Hs for cp in codP)\n        if best is None or mind>best[0]: best=(mind,off,Hs)\n    meH += best[2]\n    print(f\"methyl {i}: offset {best[1]}, min H-cod {round(best[0],3)}\")\n\natoms=[(\"Ru\",Ru)]\nfor rc in ringC: atoms.append((\"C\",rc))\nfor mc in meC: atoms.append((\"C\",mc))\nfor hp in meH: atoms.append((\"H\",hp))\natoms.append((\"Cl\",Cl))\nfor e,p in zip(codE,codP): atoms.append((e,p))\n\nwith open(\"guess5.xyz\",\"w\") as f:\n    f.write(f\"{len(atoms)}\\nCp*Ru(cod)Cl v5\\n\")\n    for el,p in atoms: f.write(f\"{el:2s} {p[0]:12.6f} {p[1]:12.6f} {p[2]:12.6f}\\n\")\nprint(\"atoms:\", len(atoms))\n\nimport itertools\nC=np.array([p for _,p in atoms]); E=[e for e,_ in atoms]\n# bonded pairs to exclude from clash check\nbonds=set()\ndef addb(a,b): bonds.add((min(a,b),max(a,b)))\nfor i in range(1,6):\n    addb(i, 1+(i%5)); addb(i, 5+i)\nfor i in range(6,11):\n    for j in range(3): addb(i, 11+3*(i-6)+j)\naddb(27,28); addb(28,29); addb(29,30); addb(30,31); addb(31,32); addb(32,33); addb(33,34); addb(34,27)\ncodH={27:[35],28:[36],29:[37,38],30:[39,40],31:[41],32:[42],33:[43,44],34:[45,46]}\nfor c,hhs in codH.items():\n    for hh in hhs: addb(c,hh)\nworst=[]\nfor i,j in itertools.combinations(range(len(E)),2):\n    if (i,j) in bonds: continue\n    dd=np.linalg.norm(C[i]-C[j])\n    lim = 1.7 if (E[i]==\"H\" and E[j]==\"H\") else (2.2 if \"H\" in (E[i],E[j]) else 2.0)\n    if dd<lim: worst.append((E[i],i,E[j],j,round(dd,3)))\nworst.sort(key=lambda x:x[4])\nprint(\"nonbonded close contacts:\", worst)\nEOF\npython3 build5.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 77790,
+   "output_tokens": 1472,
+   "total_tokens": 79262
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "methyl 0: offset 30, min H-cod 3.792\nmethyl 1: offset 0, min H-cod 2.544\nmethyl 2: offset 65, min H-cod 1.785\nmethyl 3: offset 115, min H-cod 1.785\nmethyl 4: offset 60, min H-cod 2.544\natoms: 47\nnonbonded close contacts: [('C', 8, 'H', 36, np.float64(1.925)), ('C', 9, 'H', 41, np.float64(1.925)), ('C', 27, 'H', 36, np.float64(2.102)), ('C', 28, 'H', 35, np.float64(2.102)), ('C', 31, 'H', 42, np.float64(2.102)), ('C', 32, 'H', 41, np.float64(2.102)), ('C', 27, 'H', 46, np.float64(2.114)), ('C', 28, 'H', 37, np.float64(2.114)), ('C', 31, 'H', 40, np.float64(2.114)), ('C', 32, 'H', 44, np.float64(2.114)), ('C', 1, 'H', 11, np.float64(2.128)), ('C', 1, 'H', 12, np.float64(2.128)), ('C', 1, 'H', 13, np.float64(2.128)), ('C', 2, 'H', 14, np.float64(2.128)), ('C', 2, 'H', 15, np.float64(2.128)), ('C', 2, 'H', 16, np.float64(2.128)), ('C', 3, 'H', 17, np.float64(2.128)), ('C', 3, 'H', 18, np.float64(2.128)), ('C', 3, 'H', 19, np.float64(2.128)), ('C', 4, 'H', 20, np.float64(2.128)), ('C', 4, 'H', 21, np.float64(2.128)), ('C', 4, 'H', 22, np.float64(2.128)), ('C', 5, 'H', 23, np.float64(2.128)), ('C', 5, 'H', 24, np.float64(2.128)), ('C', 5, 'H', 25, np.float64(2.128)), ('C', 3, 'H', 36, np.float64(2.151)), ('C', 4, 'H', 41, np.float64(2.151)), ('C', 29, 'H', 40, np.float64(2.164)), ('C', 30, 'H', 37, np.float64(2.164)), ('C', 33, 'H', 46, np.float64(2.164)), ('C', 34, 'H', 44, np.float64(2.164)), ('C', 27, 'H', 45, np.float64(2.186)), ('C', 28, 'H', 38, np.float64(2.186)), ('C', 31, 'H', 39, np.float64(2.186)), ('C', 32, 'H', 43, np.float64(2.186))]\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:24"
+ },
+ {
+  "type": "AIMessage",
+  "content": "All contacts are now benign (worst H\u00b7\u00b7\u00b7H \u2248 1.79 \u00c5). Now the final GFN-FF polish with metal-ligand constraints:",
+  "tool_calls": [
+   {
+    "name": "constraint_xtb",
+    "args": {
+     "input_xyz": "guess5.xyz",
+     "output_xyz": "opt5.xyz",
+     "gfn_method": "gfnff",
+     "charge": 0,
+     "uhf": 0,
+     "ncores": 4,
+     "force_constant": 0.5,
+     "distance_constraints": [
+      {
+       "atoms": [
+        0,
+        26
+       ],
+       "value": 2.42
+      },
+      {
+       "atoms": [
+        0,
+        27
+       ],
+       "value": 2.18
+      },
+      {
+       "atoms": [
+        0,
+        28
+       ],
+       "value": 2.18
+      },
+      {
+       "atoms": [
+        0,
+        31
+       ],
+       "value": 2.18
+      },
+      {
+       "atoms": [
+        0,
+        32
+       ],
+       "value": 2.18
+      },
+      {
+       "atoms": [
+        0,
+        1
+       ],
+       "value": 2.21
+      },
+      {
+       "atoms": [
+        0,
+        2
+       ],
+       "value": 2.21
+      },
+      {
+       "atoms": [
+        0,
+        3
+       ],
+       "value": 2.21
+      },
+      {
+       "atoms": [
+        0,
+        4
+       ],
+       "value": 2.21
+      },
+      {
+       "atoms": [
+        0,
+        5
+       ],
+       "value": 2.21
+      }
+     ]
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 80093,
+   "output_tokens": 636,
+   "total_tokens": 80729
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "{\"return_code\": 0, \"output_xyz\": \"/h/400/skaxu/elagenteworkdir/mol_0211_8314f5f8_kimi-k3/opt5.xyz\", \"log_path\": \"/h/400/skaxu/elagenteworkdir/mol_0211_8314f5f8_kimi-k3/opt5.log\", \"error_msg\": null}",
+  "name": "constraint_xtb",
+  "tool_call_id": "constraint_xtb:25"
+ },
+ {
+  "type": "AIMessage",
+  "content": "Let me verify the optimized structure thoroughly:",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python3 << 'EOF'\nimport numpy as np, itertools\nlines = open(\"opt5.xyz\").read().splitlines()\nn=int(lines[0]); E=[]; C=[]\nfor ln in lines[2:2+n]:\n    p=ln.split(); E.append(p[0]); C.append([float(x) for x in p[1:4]])\nC=np.array(C); d=lambda a,b: np.linalg.norm(C[a]-C[b])\nprint(\"comment:\", lines[1])\nRu=0; Cl=26\nprint(\"Ru-Cl:\", round(d(0,26),3))\nprint(\"Ru-Cp ring:\", [round(d(0,i),3) for i in range(1,6)])\nprint(\"Ru-centroid:\", round(np.linalg.norm(C[0]-C[1:6].mean(axis=0)),3))\nprint(\"Ru-C(sp2):\", [round(d(0,i),3) for i in (27,28,31,32)])\nprint(\"C=C:\", round(d(27,28),3), round(d(31,32),3))\nprint(\"cod chain:\", round(d(28,29),3), round(d(29,30),3), round(d(30,31),3), \"|\", round(d(27,34),3), round(d(33,34),3), round(d(32,33),3))\nprint(\"ring C-C:\", [round(d(i,1+i%5),3) for i in range(1,6)])\nprint(\"C-Me:\", [round(d(i,5+i),3) for i in range(1,6)])\ndef ang(a,b,c):\n    v1=C[a]-C[b]; v2=C[c]-C[b]\n    return round(np.degrees(np.arccos(np.dot(v1,v2)/np.linalg.norm(v1)/np.linalg.norm(v2))),1)\nprint(\"cod angles: C1C2C3\",ang(27,28,29),\" C2C3C4\",ang(28,29,30),\" C3C4C5\",ang(29,30,31),\" C4C5C6\",ang(30,31,32))\nprint(\"           C5C6C7\",ang(31,32,33),\" C6C7C8\",ang(32,33,34),\" C7C8C1\",ang(33,34,27),\" C8C1C2\",ang(34,27,28))\n# C-H bonds\nch=[]\nbonds=set()\ndef addb(a,b): bonds.add((min(a,b),max(a,b)))\nfor i in range(1,6): addb(i,1+i%5); addb(i,5+i)\nfor i in range(6,11):\n    for j in range(3): addb(i,11+3*(i-6)+j)\nfor pr in [(27,28),(28,29),(29,30),(30,31),(31,32),(32,33),(33,34),(34,27)]: addb(*pr)\nfor c,hhs in {27:[35],28:[36],29:[37,38],30:[39,40],31:[41],32:[42],33:[43,44],34:[45,46]}.items():\n    for hh in hhs: addb(c,hh)\nchd=[d(a,b) for a,b in bonds if E[a]==\"C\" and E[b]==\"H\"]\nprint(\"C-H range:\", round(min(chd),3), \"-\", round(max(chd),3))\n# nonbonded worst\nworst=[]\nfor i,j in itertools.combinations(range(len(E)),2):\n    if (i,j) in bonds: continue\n    dd=d(i,j)\n    lim = 1.6 if (E[i]==\"H\" and E[j]==\"H\") else (2.0 if \"H\" in (E[i],E[j]) else 1.9)\n    if dd<lim: worst.append((E[i],i,E[j],j,round(dd,3)))\nworst.sort(key=lambda x:x[4])\nprint(\"close nonbonded:\", worst[:12])\n# formula check\nfrom collections import Counter\nprint(Counter(E))\nEOF"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 80843,
+   "output_tokens": 976,
+   "total_tokens": 81819
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "comment:  energy: -7.770935394202 gnorm: 0.000665953808 xtb: 6.7.1 (edcfbbe)\nRu-Cl: 2.444\nRu-Cp ring: [np.float64(2.211), np.float64(2.21), np.float64(2.212), np.float64(2.211), np.float64(2.212)]\nRu-centroid: 1.828\nRu-C(sp2): [np.float64(2.187), np.float64(2.184), np.float64(2.187), np.float64(2.183)]\nC=C: 1.364 1.365\ncod chain: 1.518 1.542 1.518 | 1.52 1.544 1.519\nring C-C: [np.float64(1.462), np.float64(1.462), np.float64(1.463), np.float64(1.463), np.float64(1.46)]\nC-Me: [np.float64(1.5), np.float64(1.5), np.float64(1.502), np.float64(1.502), np.float64(1.502)]\ncod angles: C1C2C3 125.1  C2C3C4 113.8  C3C4C5 113.2  C4C5C6 124.0\n           C5C6C7 124.6  C6C7C8 113.8  C7C8C1 113.5  C8C1C2 123.7\nC-H range: 1.09 - 1.098\nclose nonbonded: []\nCounter({'H': 27, 'C': 18, 'Ru': 1, 'Cl': 1})\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:26"
+ },
+ {
+  "type": "AIMessage",
+  "content": "The structure is now excellent \u2014 all metrics are chemically sensible (Ru-Cl 2.44, Ru-Cp 2.21, Ru-alkene 2.18-2.19 \u00c5, no clashes, correct formula C\u2081\u2088H\u2082\u2087ClRu). Let me view it to confirm the overall shape matches the drawing:",
+  "tool_calls": [
+   {
+    "name": "view_molecule",
+    "args": {
+     "xyz_file_relative_path": "opt5.xyz",
+     "left_right_deg": 0,
+     "up_down_deg": 0,
+     "reset_view": true
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 82254,
+   "output_tokens": 473,
+   "total_tokens": 82727
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[image]",
+  "name": "view_molecule",
+  "tool_call_id": "view_molecule:27"
+ },
+ {
+  "type": "AIMessage",
+  "content": "The camera orientation makes it hard to judge \u2014 let me rotate for a clearer side view of the piano stool:",
+  "tool_calls": [
+   {
+    "name": "view_molecule",
+    "args": {
+     "xyz_file_relative_path": "opt5.xyz",
+     "left_right_deg": 90,
+     "up_down_deg": 90
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 84103,
+   "output_tokens": 584,
+   "total_tokens": 84687
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[image]",
+  "name": "view_molecule",
+  "tool_call_id": "view_molecule:28"
+ },
+ {
+  "type": "AIMessage",
+  "content": "The numeric checks already confirm correctness. Let me do a clean custom rendering with proper bond perception to visually verify the piano-stool structure from a side view:",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python3 << 'EOF'\nimport numpy as np\nimport matplotlib\nmatplotlib.use(\"Agg\")\nimport matplotlib.pyplot as plt\nfrom mpl_toolkits.mplot3d import Axes3D\n\nlines = open(\"opt5.xyz\").read().splitlines()\nn=int(lines[0]); E=[]; C=[]\nfor ln in lines[2:2+n]:\n    p=ln.split(); E.append(p[0]); C.append([float(x) for x in p[1:4]])\nC=np.array(C)\ncolors={\"Ru\":\"teal\",\"Cl\":\"limegreen\",\"C\":\"goldenrod\",\"H\":\"lightgrey\"}\nsizes={\"Ru\":500,\"Cl\":400,\"C\":220,\"H\":60}\n\nfig = plt.figure(figsize=(14,7))\nfor k,(elev,azim) in enumerate([(12,-60),(80,-60)]):\n    ax = fig.add_subplot(1,2,k, projection=\"3d\")\n    for i,(e,p) in enumerate(zip(E,C)):\n        ax.scatter(*p, c=colors[e], s=sizes[e], edgecolors=\"k\", linewidths=0.4, depthshade=True)\n    # bonds\n    for i in range(n):\n        for j in range(i+1,n):\n            dd = np.linalg.norm(C[i]-C[j])\n            pair = {E[i],E[j]}\n            lim = 1.75\n            if \"Ru\" in pair: lim = 2.55 if \"Cl\" not in pair else 2.7\n            if dd<lim:\n                ax.plot([C[i][0],C[j][0]],[C[i][1],C[j][1]],[C[i][2],C[j][2]], color=\"gray\", lw=1.5)\n    ax.view_init(elev=elev, azim=azim)\n    ax.set_box_aspect((1,1,1)); ax.set_axis_off()\n    # equal scale\n    mx = (C.max(axis=0)+C.min(axis=0))/2; r = (C.max(axis=0)-C.min(axis=0)).max()/2*1.1\n    ax.set_xlim(mx[0]-r,mx[0]+r); ax.set_ylim(mx[1]-r,mx[1]+r); ax.set_zlim(mx[2]-r,mx[2]+r)\nplt.tight_layout(); plt.savefig(\"render.png\", dpi=130)\nprint(\"saved render.png\")\nEOF"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 86063,
+   "output_tokens": 1364,
+   "total_tokens": 87427
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "Traceback (most recent call last):\n  File \"<stdin>\", line 17, in <module>\n  File \"/h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/matplotlib/figure.py\", line 768, in add_subplot\n    ax = projection_class(self, *args, **pkw)\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/mpl_toolkits/mplot3d/axes3d.py\", line 159, in __init__\n    super().__init__(\n  File \"/h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/matplotlib/axes/_base.py\", line 692, in __init__\n    subplotspec = SubplotSpec._from_subplot_args(fig, args)\n                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/h/400/skaxu/miniforge3/envs/elagente_env/lib/python3.12/site-packages/matplotlib/gridspec.py\", line 589, in _from_subplot_args\n    raise ValueError(\nValueError: num must be an integer with 1 <= num <= 2, not 0\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:29"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python3 << 'EOF'\nimport numpy as np\nimport matplotlib\nmatplotlib.use(\"Agg\")\nimport matplotlib.pyplot as plt\nfrom mpl_toolkits.mplot3d import Axes3D\n\nlines = open(\"opt5.xyz\").read().splitlines()\nn=int(lines[0]); E=[]; C=[]\nfor ln in lines[2:2+n]:\n    p=ln.split(); E.append(p[0]); C.append([float(x) for x in p[1:4]])\nC=np.array(C)\ncolors={\"Ru\":\"teal\",\"Cl\":\"limegreen\",\"C\":\"goldenrod\",\"H\":\"lightgrey\"}\nsizes={\"Ru\":500,\"Cl\":400,\"C\":220,\"H\":60}\n\nfig = plt.figure(figsize=(14,7))\nfor k,(elev,azim) in enumerate([(12,-60),(80,-60)]):\n    ax = fig.add_subplot(1,2,k+1, projection=\"3d\")\n    for i,(e,p) in enumerate(zip(E,C)):\n        ax.scatter(*p, c=colors[e], s=sizes[e], edgecolors=\"k\", linewidths=0.4, depthshade=True)\n    for i in range(n):\n        for j in range(i+1,n):\n            dd = np.linalg.norm(C[i]-C[j])\n            pair = {E[i],E[j]}\n            lim = 1.75\n            if \"Ru\" in pair: lim = 2.55 if \"Cl\" not in pair else 2.7\n            if dd<lim:\n                ax.plot([C[i][0],C[j][0]],[C[i][1],C[j][1]],[C[i][2],C[j][2]], color=\"gray\", lw=1.5)\n    ax.view_init(elev=elev, azim=azim)\n    ax.set_box_aspect((1,1,1)); ax.set_axis_off()\n    mx = (C.max(axis=0)+C.min(axis=0))/2; r = (C.max(axis=0)-C.min(axis=0)).max()/2*1.1\n    ax.set_xlim(mx[0]-r,mx[0]+r); ax.set_ylim(mx[1]-r,mx[1]+r); ax.set_zlim(mx[2]-r,mx[2]+r)\nplt.tight_layout(); plt.savefig(\"render.png\", dpi=130)\nprint(\"saved render.png\")\nEOF"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 87727,
+   "output_tokens": 576,
+   "total_tokens": 88303
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "saved render.png\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:30"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "view_png_file",
+    "args": {
+     "png_file_relative_path": "render.png"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 88337,
+   "output_tokens": 54,
+   "total_tokens": 88391
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[image]",
+  "name": "view_png_file",
+  "tool_call_id": "view_png_file:31"
+ },
+ {
+  "type": "AIMessage",
+  "content": "The rendering confirms a proper piano-stool structure: Cp* (\u03b7\u2075) on top, Ru center, both cod double bonds chelating below, and Cl as the third leg \u2014 exactly matching the 2D drawing. Now let me write the final `answer.xyz`:",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python3 << 'EOF'\nlines = open(\"opt5.xyz\").read().splitlines()\nn = int(lines[0])\nbody = lines[2:2+n]\nwith open(\"answer.xyz\",\"w\") as f:\n    f.write(f\"{n}\\n\")\n    f.write(\"(pentamethylcyclopentadienyl)(1,5-cyclooctadiene)ruthenium(II) chloride, Cp*Ru(cod)Cl\\n\")\n    for ln in body:\n        f.write(ln + \"\\n\")\nprint(open(\"answer.xyz\").read())\nEOF\nls -la answer.xyz"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 90615,
+   "output_tokens": 774,
+   "total_tokens": 91389
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "47\n(pentamethylcyclopentadienyl)(1,5-cyclooctadiene)ruthenium(II) chloride, Cp*Ru(cod)Cl\nRu          -0.22667955162773       -0.24809906340465       -0.06904500143554\nC           -0.09132033870036        1.08405085974744        1.69069406607433\nC           -1.26819696203442        0.22678159195662        1.82197989840079\nC           -0.81241150193016       -1.16194870761809        1.85813816596144\nC            0.64659001258524       -1.16300369035303        1.74447898364864\nC            1.09022807100899        0.22760906683095        1.64286497142718\nC           -0.06969137520849        2.57685513598955        1.83440542051153\nC           -2.66564417493084        0.69216744481362        2.10358868183564\nC           -1.65551843533069       -2.32826031539605        2.28952562565283\nC            1.54465619782123       -2.34285871691697        1.98172157341294\nC            2.50444211042877        0.71759248927199        1.77295605492124\nH           -0.97220181165811        3.02409029304769        1.41834255811291\nH           -0.00243003276163        2.86275070430491        2.88428970681450\nH            0.78338346597102        3.00751869344935        1.30980780499946\nH           -3.39900829211055       -0.01942424215806        1.72405932790780\nH           -2.82607750936125        0.80673362598215        3.17598244277858\nH           -2.86256497343558        1.65231909020676        1.62685820896726\nH           -1.72110127848927       -2.37029605838668        3.37703501070156\nH           -2.66929372610734       -2.24903250337890        1.89637343288776\nH           -1.23647833076960       -3.27324197133978        1.94386261255443\nH            1.92419445616345       -2.33674334097134        3.00371267833059\nH            1.01513607131991       -3.28259242539249        1.82803571075528\nH            2.39934304555860       -2.33137963036081        1.30539517162632\nH            2.67060714068494        1.14950831662739        2.76036817373122\nH            3.22154565925562       -0.09280345339157        1.64076497382328\nH            2.72297348772762        1.48474288987533        1.02934463067307\nCl          -1.55633836791466        1.69944766647564       -0.71256644663650\nC           -1.43919696888600       -0.99502685447013       -1.72867723451163\nC           -0.95704447623142       -2.06571467404971       -1.03433394147050\nC            0.24604323771132       -2.89831995826412       -1.43794346990156\nC            1.44666192512714       -2.06229319642589       -1.92657558233181\nC            1.56984527536690       -0.72225327402329       -1.22310037228137\nC            1.04512283846285        0.44222629020179       -1.70368067160642\nC            0.19386797185931        0.55097312093938       -2.95673599780699\nC           -0.88940897853418       -0.54337996689556       -3.07218376852540\nH           -2.38161318242795       -0.53467579508127       -1.40686264261457\nH           -1.57052620778167       -2.46521757735603       -0.21870470380590\nH            0.55717052456578       -3.49954787792883       -0.57362533984813\nH           -0.05206684275563       -3.62855924120429       -2.20081665063716\nH            1.37886073309205       -1.88167669213860       -3.00516645761926\nH            2.37769558266818       -2.63385539806118       -1.81292643935422\nH            2.28946944336112       -0.67777172064656       -0.39917710411088\nH            1.35769361247281        1.38758308454796       -1.24100999183697\nH            0.84092478510965        0.55157906079616       -3.84285254787176\nH           -0.29415781859275        1.53473568204050       -2.95646527748250\nH           -0.49746514142648       -1.42162954264414       -3.59728531517055\nH           -1.71001836928791       -0.19647821878828       -3.71441192972565\n\n-rw-r--r-- 1 root root 3755 Sep 27 03:26 answer.xyz\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:32"
+ },
+ {
+  "type": "AIMessage",
+  "content": "`answer.xyz` is written. Let me run a final validation directly on the answer file:",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python3 << 'EOF'\nimport numpy as np, itertools, os\nfrom collections import Counter\nlines = open(\"answer.xyz\").read().splitlines()\nn = int(lines[0])\nE=[]; C=[]\nfor ln in lines[2:2+n]:\n    p=ln.split(); E.append(p[0]); C.append([float(x) for x in p[1:4]])\nC=np.array(C); d=lambda a,b: np.linalg.norm(C[a]-C[b])\nassert len(E)==n==47, (len(E), n)\nprint(\"File exists:\", os.path.exists(\"answer.xyz\"), \"| atoms:\", n, \"| formula:\", dict(Counter(E)))\nprint(\"Key distances:\")\nprint(\"  Ru-Cl           :\", round(d(0,26),3), \"A\")\nprint(\"  Ru-Cp* centroid :\", round(np.linalg.norm(C[0]-C[1:6].mean(axis=0)),3), \"A\")\nprint(\"  Ru-Cp* C        :\", [round(d(0,i),2) for i in range(1,6)])\nprint(\"  Ru-alkene C     :\", [round(d(0,i),2) for i in (27,28,31,32)])\nprint(\"  C=C (cod)       :\", round(d(27,28),3), round(d(31,32),3))\n# connectivity sanity: every H bonded to a C within 1.2 A\nh_ok = all(min(d(i,j) for j in range(n) if E[j]==\"C\") < 1.2 for i in range(n) if E[i]==\"H\")\nprint(\"  all 27 H bonded to carbon:\", h_ok)\n# no nonbonded contacts < 1.55 A (excluding C-H bonds)\nworst=9\nfor i,j in itertools.combinations(range(n),2):\n    dd=d(i,j)\n    if dd<1.55:\n        if not (dd>1.0 and {E[i],E[j]}=={\"C\",\"H\"}):  # skip C-H bonds\n            worst=min(worst,dd)\nprint(\"  shortest suspicious contact:\", round(worst,3) if worst<9 else \"none\")\nprint(\"  right-handed coordinate system: standard XYZ, angstrom units\")\nEOF"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 92846,
+   "output_tokens": 620,
+   "total_tokens": 93466
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "File exists: True | atoms: 47 | formula: {'Ru': 1, 'C': 18, 'H': 27, 'Cl': 1}\nKey distances:\n  Ru-Cl           : 2.444 A\n  Ru-Cp* centroid : 1.828 A\n  Ru-Cp* C        : [np.float64(2.21), np.float64(2.21), np.float64(2.21), np.float64(2.21), np.float64(2.21)]\n  Ru-alkene C     : [np.float64(2.19), np.float64(2.18), np.float64(2.19), np.float64(2.18)]\n  C=C (cod)       : 1.364 1.365\n  all 27 H bonded to carbon: True\n  shortest suspicious contact: 1.364\n  right-handed coordinate system: standard XYZ, angstrom units\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:33"
+ },
+ {
+  "type": "AIMessage",
+  "content": "The 3D structure is complete and validated. **`answer.xyz` exists in the working directory.**\n\n## Summary\n\nThe 2D drawing depicts **(\u03b7\u2075-pentamethylcyclopentadienyl)(1,5-cyclooctadiene)ruthenium(II) chloride**, Cp*Ru(cod)Cl \u2014 a classic \"piano-stool\" complex:\n\n- **Cp* ligand** (C\u2085Me\u2085, top): \u03b7\u2075-bound, Ru\u2013C = 2.21 \u00c5, Ru\u2013centroid = 1.83 \u00c5\n- **Ru center** with three \"legs\":\n  - **Cl**: Ru\u2013Cl = 2.44 \u00c5\n  - **1,5-cyclooctadiene**: chelating through both double bonds (\u03b7\u00b2:\u03b7\u00b2), Ru\u2013C(alkene) = 2.18\u20132.19 \u00c5, coordinated C=C = 1.36 \u00c5\n- Formula: **C\u2081\u2088H\u2082\u2087ClRu** (47 atoms, all explicit hydrogens included)\n\n**Construction process:**\n1. Built an idealized heavy-atom framework (Cp* ring + methyls, Ru at origin, cod in its bound conformation with both CH\u2082\u2013CH\u2082 bridges pointing away from the metal)\n2. Found GFN2-xTB destroys this haptic/alkene bonding, so used RDKit/UFF to generate clash-free cod hydrogen positions on the bound skeleton, and rotation-optimized the methyl C\u2013H orientations\n3. Polished with a GFN-FF optimization constraining only the metal\u2013ligand distances (Ru\u2013Cl, 4\u00d7 Ru\u2013alkene, 5\u00d7 Ru\u2013Cp)\n\nFinal geometry is clean: no close contacts, all C\u2013H = 1.09 \u00c5, natural ring angles (sp\u00b2 ~124\u00b0, sp\u00b3 ~113\u2013114\u00b0), right-handed Cartesian coordinates in \u00c5ngstr\u00f6ms, standard XYZ format.",
+  "usage": {
+   "input_tokens": 93700,
+   "output_tokens": 698,
+   "total_tokens": 94398
+  }
+ }
+]

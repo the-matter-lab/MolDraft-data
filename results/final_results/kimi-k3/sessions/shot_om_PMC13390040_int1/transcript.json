@@ -1,0 +1,646 @@
+[
+ {
+  "type": "SystemMessage",
+  "content": "You are a helpful chemistry assistant. You build 3D molecular\n  structures from the chemical information you are given, including 2D drawings\n  supplied as images.\n\n  When you are given a 2D drawing of a molecule, your task is to produce the 3D\n  structure that drawing depicts and save it as `answer.xyz` in your working\n  directory.\n\n  Requirements for `answer.xyz`:\n  - Include all explicit hydrogens.\n  - Use a right-handed Cartesian coordinate system, units of angstroms.\n  - Standard XYZ format: first line is the total atom count, second line a\n    one-line comment, each remaining line `Element X Y Z`.\n\n  When you are done, confirm that `answer.xyz` exists in the working directory.\n  \n\n[IMPORTANT CONSTRAINT] You must NOT call multiple tools in parallel. Execute tools ONE AT A TIME, sequentially. Wait for each tool's result before calling the next tool. Never batch multiple tool calls in a single response."
+ },
+ {
+  "type": "HumanMessage",
+  "content": "A 2D structure of a molecule is provided as a PNG file in your working directory: mol_0058.png\n\nBuild the 3D structure it depicts and save it as answer.xyz.\n"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "view_png_file",
+    "args": {
+     "png_file_relative_path": "mol_0058.png"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 1408,
+   "output_tokens": 75,
+   "total_tokens": 1483
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[image]",
+  "name": "view_png_file",
+  "tool_call_id": "view_png_file:0"
+ },
+ {
+  "type": "AIMessage",
+  "content": "I'll analyze this 2D structure. It shows a Rhodium complex with:\n- A 2-siloxy-quinoline ligand (with two methyl groups) chelating Rh through N and Si\n- A hydride (H, hashed wedge)\n- A triflate group (OTf, solid wedge)\n- A PCy\u2083 ligand\n\nLet me first check the working directory and available tools.",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "ls -la && python3 -c \"import rdkit; print('rdkit', rdkit.__version__)\" 2>/dev/null || echo \"no rdkit\"; which xtb || echo \"no xtb in path\""
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 1737,
+   "output_tokens": 14862,
+   "total_tokens": 16599
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "total 98\ndrwxr-xr-x  2 root root     3 Oct  6 21:44 .\ndrwxr-xr-x 64 root root    64 Oct  6 21:46 ..\n-rw-r--r--  1 root root 14750 Oct  6 21:44 mol_0058.png\nrdkit 2026.03.1\n/h/400/skaxu/miniforge3/envs/elagente_env/bin/xtb\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:1"
+ },
+ {
+  "type": "AIMessage",
+  "content": "RDKit and xTB are both available. Let me examine the image once more to make sure I capture all substituents correctly.",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cd /h/400/skaxu/mol_bench_workdir 2>/dev/null || pwd; python3 -c \"\nfrom PIL import Image\nimg = Image.open('mol_0058.png')\nprint(img.size)\n# upscale to see details\nimg2 = img.resize((img.size[0]*3, img.size[1]*3), Image.LANCZOS)\nimg2.save('mol_big.png')\nprint('saved')\n\""
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 16738,
+   "output_tokens": 5004,
+   "total_tokens": 21742
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "/h/400/skaxu/elagenteworkdir/mol_0058_004abd60_kimi-k3\n(293, 423)\nsaved\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:2"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "view_png_file",
+    "args": {
+     "png_file_relative_path": "mol_big.png"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 21804,
+   "output_tokens": 75,
+   "total_tokens": 21879
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[image]",
+  "name": "view_png_file",
+  "tool_call_id": "view_png_file:3"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > build.py << 'EOF'\nimport numpy as np\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem\n\ndef norm(v):\n    v = np.asarray(v, float)\n    return v/np.linalg.norm(v)\n\ndef rotmat_from_to(a, b):\n    a = norm(a); b = norm(b)\n    v = np.cross(a, b); c = np.dot(a, b)\n    if np.linalg.norm(v) < 1e-9:\n        if c > 0: return np.eye(3)\n        axis = norm(np.cross(a, [1,0,0]) if abs(a[0]) < 0.9 else np.cross(a, [0,1,0]))\n        return 2*np.outer(axis, axis) - np.eye(3)\n    vx = np.array([[0,-v[2],v[1]],[v[2],0,-v[0]],[-v[1],v[0],0]])\n    return np.eye(3) + vx + vx@vx*((1-c)/(np.linalg.norm(v)**2))\n\ndef rot_about(p, p0, axis, ang):\n    axis = norm(axis); x = np.asarray(p, float) - p0\n    return p0 + x*np.cos(ang) + np.cross(axis, x)*np.sin(ang) + axis*np.dot(axis, x)*(1-np.cos(ang))\n\ndef embed_opt(mol, seed=42):\n    ps = AllChem.ETKDGv3(); ps.randomSeed = seed\n    assert AllChem.EmbedMolecule(mol, ps) == 0\n    try:\n        AllChem.MMFFOptimizeMolecule(mol)\n    except Exception:\n        try: AllChem.UFFOptimizeMolecule(mol)\n        except Exception: pass\n    return mol\n\nVDW = {'H':1.20,'C':1.70,'N':1.55,'O':1.52,'F':1.47,'P':1.80,'S':1.80,'Si':2.10,'Rh':1.60}\n\n# ============ Fragment 1: 2-(dimethylsilyloxy)-4,8-dimethylquinoline ============\nlig = Chem.MolFromSmiles(\"Cc1cc(O[SiH](C)C)nc2c1cccc2C\")\nlig = Chem.AddHs(lig)\nembed_opt(lig)\nconf = lig.GetConformer()\npos = np.array([list(conf.GetAtomPosition(i)) for i in range(lig.GetNumAtoms())])\nsym = [a.GetSymbol() for a in lig.GetAtoms()]\n\nsi  = next(a.GetIdx() for a in lig.GetAtoms() if a.GetSymbol()=='Si')\no_l = next(a.GetIdx() for a in lig.GetAtoms() if a.GetSymbol()=='O')\nn1  = next(a.GetIdx() for a in lig.GetAtoms() if a.GetSymbol()=='N')\nc2  = next(a.GetIdx() for a in lig.GetAtoms() if a.GetSymbol()=='C' and a.GetIsAromatic()\n           and n1 in [x.GetIdx() for x in a.GetNeighbors()] and o_l in [x.GetIdx() for x in a.GetNeighbors()])\nsi_nbrs = lig.GetAtomWithIdx(si).GetNeighbors()\nsi_me = [x.GetIdx() for x in si_nbrs if x.GetSymbol()=='C']\nsi_h  = [x.GetIdx() for x in si_nbrs if x.GetSymbol()=='H']\nassert len(si_me)==2 and len(si_h)==1\n# atoms to drop from RDKit fragment (Si-Me groups incl. their Hs, and Si-H)\ndrop = set(si_h)\nfor c in si_me:\n    drop.add(c)\n    drop.update(x.GetIdx() for x in lig.GetAtomWithIdx(c).GetNeighbors() if x.GetSymbol()=='H')\nkeep = [i for i in range(lig.GetNumAtoms()) if i not in drop]\n\n# ---- targets (Rh at origin; axial N(+y)/P(-y); equatorial Si,H,OTf) ----\na_t = np.array([0.0, 2.20, 0.0])                       # N1\nb_t = 2.38*np.array([-np.sin(np.radians(82.0)), np.cos(np.radians(82.0)), 0.0])  # Si (82 deg bite)\nx_t = norm(b_t - a_t)\nn_line = norm(np.cross([0,0,1.0], x_t))\nif np.dot((np.array([0.0,0,0])-a_t), n_line) > 0: n_line = -n_line  # n_line -> away from Rh side? want away\ny_t = norm(-n_line if np.dot(-a_t, n_line)>0 else n_line)          # y_t = away from Rh\n# recompute cleanly: Rh side sign\nside_rh = np.dot(-a_t, np.cross([0,0,1.0], x_t))\nnl = norm(np.cross([0,0,1.0], x_t))\ny_t = -nl if side_rh > 0 else nl\nz_t = norm(np.cross(x_t, y_t)); y_t = np.cross(z_t, x_t)\n\n# ligand local frame\na = pos[n1]; x_l = norm(pos[si]-a)\ny_l = norm((pos[c2]-a) - x_l*np.dot(pos[c2]-a, x_l))\nz_l = np.cross(x_l, y_l)\nL = np.column_stack([x_l, y_l, z_l]); T = np.column_stack([x_t, y_t, z_t])\nR = T @ L.T\npos_g = (R @ (pos[keep] - a).T).T + a_t\nkeep_sym = [sym[i] for i in keep]\nsi_new0 = R @ (pos[si] - a) + a_t   # Si after global alignment\n\n# ---- torsion: rotate Si about C2->O axis to land on b_t ----\nC2p = pos_g[keep.index(c2)] if c2 in keep else None\n# keep list contains c2 & o_l indices (they were kept)\ni_c2 = keep.index(c2); i_o = keep.index(o_l)\nC2p = pos_g[i_c2]; Op = pos_g[i_o]\nu = norm(Op - C2p)\ns0 = C2p + u*np.dot(si_new0 - C2p, u)\nrv = si_new0 - s0; r = np.linalg.norm(rv); e1 = rv/r; e2 = norm(np.cross(u, e1))\ncp = np.dot(b_t - s0, e1)/r; sp = np.dot(b_t - s0, e2)/r\nphi = np.arctan2(sp, cp)\nb_f = s0 + r*(np.cos(phi)*e1 + np.sin(phi)*e2)\nprint(\"Si target:\", b_t, \" placed:\", b_f, \" |Rh-Si|=\", np.linalg.norm(b_f))\n# set Si position (Si is index in keep)\ni_si = keep.index(si); pos_g[i_si] = b_f\n\n# ---- rebuild Si methyls (ideal tetrahedron w/ O-Si-Rh) ----\nu1 = norm(Op - b_f)               # Si -> O\nu2 = norm(-b_f)                   # Si -> Rh\nalpha = np.arccos(np.clip(np.dot(u1,u2),-1,1))\nprint(\"O-Si-Rh angle:\", np.degrees(alpha))\nmb = norm(u1+u2); q = norm(np.cross(u1,u2))\nxx = 1.0/(3.0*np.cos(alpha/2)); xx = min(xx, 0.95); yy = np.sqrt(max(1-xx*xx, 0.2))\nu3 = -xx*mb + yy*q; u4 = -xx*mb - yy*q\nlig_atoms = [(keep_sym[i], pos_g[i]) for i in range(len(keep)) if keep[i] != si]\nlig_atoms.append(('Si', b_f))\n# methyl carbons + hydrogens\nfor uu in (u3, u4):\n    cpos = b_f + 1.88*uu\n    lig_atoms.append(('C', cpos))\n    ac = -uu\n    e1m = norm(np.cross(ac, [1,0,0]) if abs(ac[0])<0.9 else np.cross(ac,[0,1,0]))\n    e2m = norm(np.cross(ac, e1m))\n    for k in range(3):\n        ph = np.radians(120*k + 30)\n        hd = -np.cos(np.radians(70.53))*uu + np.sin(np.radians(70.53))*(np.cos(ph)*e1m + np.sin(ph)*e2m)\n        lig_atoms.append(('H', cpos + 1.09*norm(hd)))\n\n# ============ Fragment 2: PCy3 ============\npcy = Chem.MolFromSmiles(\"C1CCCCC1P(C2CCCCC2)C3CCCCC3\")\npcy = Chem.AddHs(pcy)\nembed_opt(pcy, seed=7)\nppos = np.array([list(pcy.GetConformer().GetAtomPosition(i)) for i in range(pcy.GetNumAtoms())])\npsym = [a.GetSymbol() for a in pcy.GetAtoms()]\np_idx = next(a.GetIdx() for a in pcy.GetAtoms() if a.GetSymbol()=='P')\nipso = [x.GetIdx() for x in pcy.GetAtomWithIdx(p_idx).GetNeighbors()]\nv_lp = norm(ppos[p_idx] - np.mean(ppos[ipso], axis=0))   # lone-pair direction (P away from C base)\nRp = rotmat_from_to(v_lp, [0,1,0.0])\nppos_r = (Rp @ ppos.T).T\nP_target = np.array([0.0, -2.40, 0.0])\nppos_r = ppos_r + (P_target - ppos_r[p_idx])\nprint(\"P->Rh dist:\", np.linalg.norm(ppos_r[p_idx]))\n\n# ============ Fragment 3: triflate ============\notf = Chem.MolFromSmiles(\"O=S(=O)([O-])C(F)(F)F\")\nembed_opt(otf, seed=11)\ntpos = np.array([list(otf.GetConformer().GetAtomPosition(i)) for i in range(otf.GetNumAtoms())])\ntsym = [a.GetSymbol() for a in otf.GetAtoms()]\ns_idx = next(a.GetIdx() for a in otf.GetAtoms() if a.GetSymbol()=='S')\nom_idx = next(a.GetIdx() for a in otf.GetAtoms() if a.GetSymbol()=='O' and a.GetFormalCharge()==-1)\no_t = 2.15*np.array([0.5, 0.0, np.sin(np.radians(60))])  # equatorial position\nd_or = norm(-o_t)\nt_ax = norm(np.cross(d_or, [0,1,0]))\nw_t = np.cos(np.radians(135))*d_or + np.sin(np.radians(135))*t_ax\nRt = rotmat_from_to(norm(tpos[s_idx]-tpos[om_idx]), w_t)\ntpos_r = (Rt @ (tpos - tpos[om_idx]).T).T + o_t\nprint(\"O(OTf)->Rh dist:\", np.linalg.norm(tpos_r[om_idx]), \" Rh-O-S angle:\",\n      np.degrees(np.arccos(np.clip(np.dot(norm(-tpos_r[om_idx]), norm(tpos_r[s_idx]-tpos_r[om_idx])),-1,1))))\n\n# ============ hydride ============\nhyd = 1.55*np.array([0.5, 0.0, -np.sin(np.radians(60))])\n\n# ============ clash-aware twists ============\ndef clash_score(atomsA, atomsB):\n    s = 0\n    for sa, pa in atomsA:\n        ra = VDW[sa]\n        for sb, pb in atomsB:\n            d = np.linalg.norm(pa-pb)\n            if d < 0.75*(ra+VDW[sb]): s += 1\n    return s\n\ncore_atoms = [('Rh', np.zeros(3)), ('H', hyd)] + lig_atoms\n\n# triflate twist about Rh->O axis through o_t\nbest = None\nfor angd in range(0, 360, 30):\n    rot = [(sy, rot_about(p, o_t, norm(o_t), np.radians(angd))) for sy, p in zip(tsym, tpos_r)]\n    sc = clash_score(rot, core_atoms)\n    if best is None or sc < best[0]: best = (sc, angd, rot)\nprint(\"OTf twist:\", best[1], \"clashes:\", best[0])\ntpos_f = {sy: p for sy,p in zip(tsym, best[2])}\notf_atoms = best[2]\n\n# PCy3 twist about Rh->P axis (y axis through P_target)\nbest = None\nfor angd in range(0, 360, 15):\n    rot = [(sy, rot_about(p, P_target, [0,1,0.0], np.radians(angd))) for sy, p in zip(psym, ppos_r)]\n    sc = clash_score(rot, core_atoms + otf_atoms)\n    if best is None or sc < best[0]: best = (sc, angd, rot)\nprint(\"PCy3 twist:\", best[1], \"clashes:\", best[0])\npcy_atoms = best[2]\n\n# ============ assemble ============\nall_atoms = [('Rh', np.zeros(3))]\nall_atoms += lig_atoms\nall_atoms += pcy_atoms\nall_atoms += otf_atoms\nall_atoms += [('H', hyd)]\n\n# indices for constraints\nidx_N = 1 + next(i for i,(s,p) in enumerate(lig_atoms) if s=='N')\nidx_Si = 1 + next(i for i,(s,p) in enumerate(lig_atoms) if s=='Si')\noff_pcy = 1 + len(lig_atoms)\nidx_P = off_pcy + p_idx\noff_otf = off_pcy + len(pcy_atoms)\nidx_Otf = off_otf + om_idx\nidx_H = len(all_atoms)-1\nprint(\"N atoms:\", len(all_atoms), \"idx N,Si,P,Otf,H:\", idx_N, idx_Si, idx_P, idx_Otf, idx_H)\n\nwith open('assembled.xyz','w') as f:\n    f.write(f\"{len(all_atoms)}\\nRh silyl-quinoline hydride triflate PCy3 complex\\n\")\n    for s,p in all_atoms:\n        f.write(f\"{s:2s} {p[0]:12.6f} {p[1]:12.6f} {p[2]:12.6f}\\n\")\n\n# element tally\nfrom collections import Counter\nprint(Counter(s for s,_ in all_atoms))\nEOF\npython3 build.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 23430,
+   "output_tokens": 23429,
+   "total_tokens": 46859
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "Si target: [-2.356838    0.33123198  0.        ]  placed: [-3.01366709 -0.2349031  -0.10379892]  |Rh-Si|= 3.024589729673328\nO-Si-Rh angle: 29.52152513791154\nP->Rh dist: 2.4000000000000004\nO(OTf)->Rh dist: 2.15  Rh-O-S angle: 135.0\nOTf twist: 240 clashes: 1\nPCy3 twist: 120 clashes: 30\nN atoms: 94 idx N,Si,P,Otf,H: 6 24 39 88 93\nCounter({'H': 50, 'C': 32, 'O': 4, 'F': 3, 'Rh': 1, 'N': 1, 'Si': 1, 'P': 1, 'S': 1})\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:4"
+ },
+ {
+  "type": "AIMessage",
+  "content": "The Si placement failed (Rh\u2013Si = 3.02 \u00c5 instead of 2.38, O\u2013Si\u2013Rh angle 29.5\u00b0). Let me debug the torsion-rotation step:",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > debug.py << 'EOF'\nimport numpy as np\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem\n\ndef norm(v):\n    v = np.asarray(v, float); return v/np.linalg.norm(v)\n\nlig = Chem.MolFromSmiles(\"Cc1cc(O[SiH](C)C)nc2c1cccc2C\")\nlig = Chem.AddHs(lig)\nps = AllChem.ETKDGv3(); ps.randomSeed = 42\nAllChem.EmbedMolecule(lig, ps)\ntry: AllChem.MMFFOptimizeMolecule(lig)\nexcept Exception: AllChem.UFFOptimizeMolecule(lig)\nconf = lig.GetConformer()\npos = np.array([list(conf.GetAtomPosition(i)) for i in range(lig.GetNumAtoms())])\n\nsi  = next(a.GetIdx() for a in lig.GetAtoms() if a.GetSymbol()=='Si')\no_l = next(a.GetIdx() for a in lig.GetAtoms() if a.GetSymbol()=='O')\nn1  = next(a.GetIdx() for a in lig.GetAtoms() if a.GetSymbol()=='N')\nc2  = next(a.GetIdx() for a in lig.GetAtoms() if a.GetSymbol()=='C' and a.GetIsAromatic()\n           and n1 in [x.GetIdx() for x in a.GetNeighbors()] and o_l in [x.GetIdx() for x in a.GetNeighbors()])\nprint(\"N1-Si dist in ligand:\", np.linalg.norm(pos[n1]-pos[si]))\nprint(\"C2-O dist:\", np.linalg.norm(pos[c2]-pos[o_l]), \"O-Si dist:\", np.linalg.norm(pos[o_l]-pos[si]))\nv1 = pos[n1]-pos[c2]; v2 = pos[o_l]-pos[c2]\nprint(\"N-C2-O angle:\", np.degrees(np.arccos(np.dot(norm(v1),norm(v2)))))\nv1 = pos[c2]-pos[o_l]; v2 = pos[si]-pos[o_l]\nprint(\"C2-O-Si angle:\", np.degrees(np.arccos(np.dot(norm(v1),norm(v2)))))\nEOF\npython3 debug.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 47105,
+   "output_tokens": 2611,
+   "total_tokens": 49716
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "N1-Si dist in ligand: 3.8849605871787887\nC2-O dist: 1.364313765429296 O-Si dist: 1.6567977797450462\nN-C2-O angle: 113.190841716897\nC2-O-Si angle: 133.73023224281442\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:5"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > build2.py << 'EOF'\nimport numpy as np\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem\nfrom collections import Counter\n\ndef norm(v):\n    v = np.asarray(v, float); return v/np.linalg.norm(v)\n\ndef ang(deg): return np.array([np.cos(np.radians(deg)), np.sin(np.radians(deg)), 0.0])\n\ndef rotmat_from_to(a, b):\n    a = norm(a); b = norm(b)\n    v = np.cross(a, b); c = np.dot(a, b)\n    if np.linalg.norm(v) < 1e-9:\n        if c > 0: return np.eye(3)\n        axis = norm(np.cross(a, [1,0,0]) if abs(a[0]) < 0.9 else np.cross(a, [0,1,0]))\n        return 2*np.outer(axis, axis) - np.eye(3)\n    vx = np.array([[0,-v[2],v[1]],[v[2],0,-v[0]],[-v[1],v[0],0]])\n    return np.eye(3) + vx + vx@vx*((1-c)/(np.linalg.norm(v)**2))\n\ndef rot_about(p, p0, axis, angd):\n    axis = norm(axis); x = np.asarray(p, float) - p0\n    return p0 + x*np.cos(angd) + np.cross(axis, x)*np.sin(angd) + axis*np.dot(axis, x)*(1-np.cos(angd))\n\ndef embed_opt(mol, seed=42):\n    ps = AllChem.ETKDGv3(); ps.randomSeed = seed\n    assert AllChem.EmbedMolecule(mol, ps) == 0\n    try: AllChem.MMFFOptimizeMolecule(mol)\n    except Exception:\n        try: AllChem.UFFOptimizeMolecule(mol)\n        except Exception: pass\n    return mol\n\nVDW = {'H':1.20,'C':1.70,'N':1.55,'O':1.52,'F':1.47,'P':1.80,'S':1.80,'Si':2.10,'Rh':1.60}\n\ndef add_methyl(atoms, X, M_dir, bond=1.50):\n    \"\"\"methyl carbon at X + bond*M_dir plus 3 H\"\"\"\n    M = X + bond*norm(M_dir)\n    atoms.append(('C', M))\n    u = norm(M - X)   # ring-C -> methyl-C\n    e1 = norm(np.cross(u, [1,0,0]) if abs(u[0])<0.9 else np.cross(u,[0,1,0]))\n    e2 = norm(np.cross(u, e1))\n    for k in range(3):\n        ph = np.radians(120*k)\n        hd = (1.0/3.0)*u + 0.9428*(np.cos(ph)*e1 + np.sin(ph)*e2)\n        atoms.append(('H', M + 1.09*norm(hd)))\n    return M\n\n# ================= geometric chelate ligand =================\na_t = np.array([0.0, 2.20, 0.0])                                  # N1\nb_t = 2.38*np.array([-np.sin(np.radians(82.0)), np.cos(np.radians(82.0)), 0.0])  # Si\next1, ext2 = 61.0, 61.0 + 50.0    # exterior turns: N-C2-O=119, C2-O-Si~130(target)\n\ndef O_pos(th1):\n    return a_t + 1.33*ang(th1) + 1.36*ang(th1+ext1)\n\n# bisection: |O_pos - b_t| = 1.66\nlo, hi = 130.0, 165.0\nfor _ in range(60):\n    mid = 0.5*(lo+hi)\n    if np.linalg.norm(O_pos(mid)-b_t) > 1.66: lo = mid\n    else: hi = mid\nth1 = 0.5*(lo+hi)\nN1 = a_t\nC2 = a_t + 1.33*ang(th1)\nO  = O_pos(th1)\nSi = b_t.copy()\nprint(\"th1=%.2f  O-Si=%.3f  C2-O-Si=%.1f  N-C2-O=%.1f\" % (\n    th1, np.linalg.norm(O-Si),\n    np.degrees(np.arccos(np.dot(norm(C2-O), norm(Si-O)))),\n    np.degrees(np.arccos(np.dot(norm(N1-C2), norm(O-C2))))))\n\n# pyridine ring (regular hexagon side 1.33), turns of -60 deg from N1->C2\nC3  = C2 + 1.33*ang(th1-60)\nC4  = C3 + 1.33*ang(th1-120)\nC4a = C4 + 1.33*ang(th1-180)\nC8a = C4a + 1.33*ang(th1-240)\nN1b = C8a + 1.33*ang(th1-300)\nprint(\"pyridine closure err:\", np.linalg.norm(N1b-N1))\n# benzene ring on edge C4a->C8a, outward right turns, side 1.33\nd0 = th1-240   # direction C4a->C8a\nC5 = C4a + 1.33*ang(d0+120)\nC6 = C5  + 1.33*ang(d0+60)\nC7 = C6  + 1.33*ang(d0)\nC8 = C7  + 1.33*ang(d0-60)\nC8ab = C8 + 1.33*ang(d0-120)\nprint(\"benzene closure err:\", np.linalg.norm(C8ab-C8a))\n\ncen_py = np.mean([N1,C2,C3,C4,C4a,C8a], axis=0)\ncen_bz = np.mean([C4a,C5,C6,C7,C8,C8a], axis=0)\n\nlig_atoms = [('N',N1),('C',C2),('C',C3),('C',C4),('C',C4a),('C',C8a),\n             ('C',C5),('C',C6),('C',C7),('C',C8),('O',O),('Si',Si)]\n# ring hydrogens\nfor X, cen in [(C3,cen_py),(C5,cen_bz),(C6,cen_bz),(C7,cen_bz)]:\n    lig_atoms.append(('H', X + 1.08*norm(X-cen)))\n# ring methyls at C4 and C8\nadd_methyl(lig_atoms, C4, C4-cen_py)\nadd_methyl(lig_atoms, C8, C8-cen_bz)\n# Si methyls (tetrahedral, out of plane)\nu1 = norm(O-Si); u2 = norm(-Si)\nalpha = np.arccos(np.clip(np.dot(u1,u2),-1,1))\nprint(\"O-Si-Rh angle: %.1f\" % np.degrees(alpha))\nmb = norm(u1+u2); q = norm(np.cross(u1,u2))\nxx = 1.0/(3.0*np.cos(alpha/2)); xx = min(xx,0.95); yy = np.sqrt(max(1-xx*xx,0.2))\nfor uu in (-xx*mb+yy*q, -xx*mb-yy*q):\n    cpos = Si + 1.88*uu\n    lig_atoms.append(('C', cpos))\n    e1 = norm(np.cross(uu, [1,0,0]) if abs(uu[0])<0.9 else np.cross(uu,[0,1,0]))\n    e2 = norm(np.cross(uu, e1))\n    for k in range(3):\n        ph = np.radians(120*k+30)\n        hd = (1.0/3.0)*uu + 0.9428*(np.cos(ph)*e1+np.sin(ph)*e2)\n        lig_atoms.append(('H', cpos + 1.09*norm(hd)))\n\n# ================= PCy3 =================\npcy = Chem.MolFromSmiles(\"C1CCCCC1P(C2CCCCC2)C3CCCCC3\")\npcy = Chem.AddHs(pcy); embed_opt(pcy, seed=7)\nppos = np.array([list(pcy.GetConformer().GetAtomPosition(i)) for i in range(pcy.GetNumAtoms())])\npsym = [a.GetSymbol() for a in pcy.GetAtoms()]\np_idx = next(a.GetIdx() for a in pcy.GetAtoms() if a.GetSymbol()=='P')\nipso = [x.GetIdx() for x in pcy.GetAtomWithIdx(p_idx).GetNeighbors()]\nv_lp = norm(ppos[p_idx] - np.mean(ppos[ipso], axis=0))\nRp = rotmat_from_to(v_lp, [0,1,0.0])\nppos_r = (Rp @ ppos.T).T\nP_target = np.array([0.0, -2.40, 0.0])\nppos_r = ppos_r + (P_target - ppos_r[p_idx])\n\n# ================= triflate =================\notf = Chem.MolFromSmiles(\"O=S(=O)([O-])C(F)(F)F\"); embed_opt(otf, seed=11)\ntpos = np.array([list(otf.GetConformer().GetAtomPosition(i)) for i in range(otf.GetNumAtoms())])\ntsym = [a.GetSymbol() for a in otf.GetAtoms()]\ns_idx = next(a.GetIdx() for a in otf.GetAtoms() if a.GetSymbol()=='S')\nom_idx = next(a.GetIdx() for a in otf.GetAtoms() if a.GetSymbol()=='O' and a.GetFormalCharge()==-1)\no_t = 2.15*np.array([0.5, 0.0, np.sin(np.radians(60))])\nd_or = norm(-o_t)\nt_ax = norm(np.cross(d_or, [0,1,0]))\nw_t = np.cos(np.radians(135))*d_or + np.sin(np.radians(135))*t_ax\nRt = rotmat_from_to(norm(tpos[s_idx]-tpos[om_idx]), w_t)\ntpos_r = (Rt @ (tpos - tpos[om_idx]).T).T + o_t\n\nhyd = 1.55*np.array([0.5, 0.0, -np.sin(np.radians(60))])\n\ndef clash_score(A, B):\n    s = []\n    for i,(sa,pa) in enumerate(A):\n        for sb,pb in B:\n            d = np.linalg.norm(pa-pb)\n            if d < 0.72*(VDW[sa]+VDW[sb]): s.append((sa,sb,round(d,2)))\n    return s\n\ncore_atoms = [('Rh', np.zeros(3)), ('H', hyd)] + lig_atoms\nbest=None\nfor angd in range(0,360,15):\n    rot = [(sy, rot_about(p, o_t, norm(o_t), np.radians(angd))) for sy,p in zip(tsym,tpos_r)]\n    sc = clash_score(rot, core_atoms)\n    if best is None or len(sc)<len(best[0]): best=(sc,angd,rot)\nprint(\"OTf twist:\", best[1], \"clashes:\", best[0])\notf_atoms = best[2]\n\nbest=None\nfor angd in range(0,360,10):\n    rot = [(sy, rot_about(p, P_target, [0,1,0.0], np.radians(angd))) for sy,p in zip(psym,ppos_r)]\n    sc = clash_score(rot, core_atoms+otf_atoms)\n    if best is None or len(sc)<len(best[0]): best=(sc,angd,rot)\nprint(\"PCy3 twist:\", best[1], \"clashes:\", best[0])\npcy_atoms = best[2]\n\nall_atoms = [('Rh', np.zeros(3))] + lig_atoms + pcy_atoms + otf_atoms + [('H', hyd)]\nidx_N  = 1 + next(i for i,(s,p) in enumerate(lig_atoms) if s=='N')\nidx_Si = 1 + next(i for i,(s,p) in enumerate(lig_atoms) if s=='Si')\nidx_P  = 1 + len(lig_atoms) + p_idx\nidx_Otf= 1 + len(lig_atoms) + len(pcy_atoms) + om_idx\nidx_H  = len(all_atoms)-1\nprint(\"N atoms:\", len(all_atoms), \"| idx N,Si,P,Otf,H:\", idx_N, idx_Si, idx_P, idx_Otf, idx_H)\nprint(\"Rh distances: N %.2f Si %.2f P %.2f Otf %.2f H %.2f\" % tuple(\n    np.linalg.norm(all_atoms[i][1]) for i in [idx_N, idx_Si, idx_P, idx_Otf, idx_H]))\n\nwith open('assembled.xyz','w') as f:\n    f.write(f\"{len(all_atoms)}\\nRh(III) kappa2-N,Si silyl-quinoline hydride triflate PCy3\\n\")\n    for s,p in all_atoms:\n        f.write(f\"{s:2s} {p[0]:12.6f} {p[1]:12.6f} {p[2]:12.6f}\\n\")\nprint(Counter(s for s,_ in all_atoms))\nEOF\npython3 build2.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 49823,
+   "output_tokens": 13230,
+   "total_tokens": 63053
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "th1=154.31  O-Si=1.660  C2-O-Si=127.0  N-C2-O=119.0\npyridine closure err: 2.220446049250313e-16\nbenzene closure err: 2.220446049250313e-16\nO-Si-Rh angle: 96.3\nOTf twist: 240 clashes: [('O', 'Rh', np.float64(2.15)), ('O', 'H', np.float64(1.68))]\nPCy3 twist: 110 clashes: [('C', 'C', np.float64(1.8)), ('C', 'F', np.float64(0.96)), ('C', 'F', np.float64(1.15)), ('P', 'Rh', np.float64(2.4)), ('P', 'C', np.float64(2.47)), ('P', 'F', np.float64(2.01)), ('P', 'F', np.float64(2.07)), ('C', 'C', np.float64(2.05)), ('C', 'F', np.float64(0.95)), ('C', 'F', np.float64(2.27)), ('C', 'C', np.float64(2.34)), ('C', 'H', np.float64(1.81)), ('C', 'F', np.float64(1.88)), ('H', 'C', np.float64(1.16)), ('H', 'F', np.float64(1.13)), ('H', 'F', np.float64(1.32)), ('H', 'S', np.float64(1.82)), ('H', 'O', np.float64(1.72)), ('H', 'C', np.float64(1.96)), ('H', 'F', np.float64(1.68)), ('H', 'F', np.float64(1.71)), ('H', 'C', np.float64(1.23)), ('H', 'F', np.float64(0.46)), ('H', 'F', np.float64(1.79)), ('H', 'C', np.float64(1.4)), ('H', 'H', np.float64(1.32)), ('H', 'H', np.float64(1.16)), ('H', 'H', np.float64(1.63))]\nN atoms: 94 | idx N,Si,P,Otf,H: 1 12 39 88 93\nRh distances: N 2.20 Si 2.38 P 2.40 Otf 2.15 H 1.55\nCounter({'H': 50, 'C': 32, 'O': 4, 'F': 3, 'Rh': 1, 'N': 1, 'Si': 1, 'P': 1, 'S': 1})\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:6"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > build3.py << 'EOF'\nimport numpy as np\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem\nfrom collections import Counter\n\ndef norm(v):\n    v = np.asarray(v, float); return v/np.linalg.norm(v)\n\ndef ang(deg): return np.array([np.cos(np.radians(deg)), np.sin(np.radians(deg)), 0.0])\n\ndef rotmat_from_to(a, b):\n    a = norm(a); b = norm(b)\n    v = np.cross(a, b); c = np.dot(a, b)\n    if np.linalg.norm(v) < 1e-9:\n        if c > 0: return np.eye(3)\n        axis = norm(np.cross(a, [1,0,0]) if abs(a[0]) < 0.9 else np.cross(a, [0,1,0]))\n        return 2*np.outer(axis, axis) - np.eye(3)\n    vx = np.array([[0,-v[2],v[1]],[v[2],0,-v[0]],[-v[1],v[0],0]])\n    return np.eye(3) + vx + vx@vx*((1-c)/(np.linalg.norm(v)**2))\n\ndef rot_about(p, p0, axis, angd):\n    axis = norm(axis); x = np.asarray(p, float) - p0\n    return p0 + x*np.cos(angd) + np.cross(axis, x)*np.sin(angd) + axis*np.dot(axis, x)*(1-np.cos(angd))\n\ndef embed_opt(mol, seed=42):\n    ps = AllChem.ETKDGv3(); ps.randomSeed = seed\n    assert AllChem.EmbedMolecule(mol, ps) == 0\n    try: AllChem.MMFFOptimizeMolecule(mol)\n    except Exception:\n        try: AllChem.UFFOptimizeMolecule(mol)\n        except Exception: pass\n    return mol\n\nVDW = {'H':1.20,'C':1.70,'N':1.55,'O':1.52,'F':1.47,'P':1.80,'S':1.80,'Si':2.10,'Rh':1.60}\n\ndef add_methyl(atoms, X, M_dir, bond=1.50):\n    M = X + bond*norm(M_dir)\n    atoms.append(('C', M))\n    u = norm(M - X)\n    e1 = norm(np.cross(u, [1,0,0]) if abs(u[0])<0.9 else np.cross(u,[0,1,0]))\n    e2 = norm(np.cross(u, e1))\n    for k in range(3):\n        ph = np.radians(120*k)\n        hd = (1.0/3.0)*u + 0.9428*(np.cos(ph)*e1 + np.sin(ph)*e2)\n        atoms.append(('H', M + 1.09*norm(hd)))\n    return M\n\n# ================= geometric chelate ligand =================\na_t = np.array([0.0, 2.20, 0.0])\nb_t = 2.38*np.array([-np.sin(np.radians(82.0)), np.cos(np.radians(82.0)), 0.0])\next1 = 61.0\ndef O_pos(th1): return a_t + 1.33*ang(th1) + 1.36*ang(th1+ext1)\nlo, hi = 130.0, 165.0\nfor _ in range(60):\n    mid = 0.5*(lo+hi)\n    if np.linalg.norm(O_pos(mid)-b_t) > 1.66: lo = mid\n    else: hi = mid\nth1 = 0.5*(lo+hi)\nN1 = a_t\nC2 = a_t + 1.33*ang(th1)\nO  = O_pos(th1)\nSi = b_t.copy()\nC3  = C2 + 1.33*ang(th1-60);  C4  = C3 + 1.33*ang(th1-120)\nC4a = C4 + 1.33*ang(th1-180); C8a = C4a + 1.33*ang(th1-240)\nd0 = th1-240\nC5 = C4a + 1.33*ang(d0+120); C6 = C5 + 1.33*ang(d0+60)\nC7 = C6 + 1.33*ang(d0);      C8 = C7 + 1.33*ang(d0-60)\ncen_py = np.mean([N1,C2,C3,C4,C4a,C8a], axis=0)\ncen_bz = np.mean([C4a,C5,C6,C7,C8,C8a], axis=0)\nlig_atoms = [('N',N1),('C',C2),('C',C3),('C',C4),('C',C4a),('C',C8a),\n             ('C',C5),('C',C6),('C',C7),('C',C8),('O',O),('Si',Si)]\nfor X, cen in [(C3,cen_py),(C5,cen_bz),(C6,cen_bz),(C7,cen_bz)]:\n    lig_atoms.append(('H', X + 1.08*norm(X-cen)))\nadd_methyl(lig_atoms, C4, C4-cen_py)\nadd_methyl(lig_atoms, C8, C8-cen_bz)\nu1 = norm(O-Si); u2 = norm(-Si)\nalpha = np.arccos(np.clip(np.dot(u1,u2),-1,1))\nmb = norm(u1+u2); q = norm(np.cross(u1,u2))\nxx = 1.0/(3.0*np.cos(alpha/2)); xx = min(xx,0.95); yy = np.sqrt(max(1-xx*xx,0.2))\nfor uu in (-xx*mb+yy*q, -xx*mb-yy*q):\n    cpos = Si + 1.88*uu\n    lig_atoms.append(('C', cpos))\n    e1 = norm(np.cross(uu, [1,0,0]) if abs(uu[0])<0.9 else np.cross(uu,[0,1,0]))\n    e2 = norm(np.cross(uu, e1))\n    for k in range(3):\n        ph = np.radians(120*k+30)\n        hd = (1.0/3.0)*uu + 0.9428*(np.cos(ph)*e1+np.sin(ph)*e2)\n        lig_atoms.append(('H', cpos + 1.09*norm(hd)))\n\n# ================= PCy3 =================\npcy = Chem.MolFromSmiles(\"C1CCCCC1P(C2CCCCC2)C3CCCCC3\")\npcy = Chem.AddHs(pcy); embed_opt(pcy, seed=7)\nppos = np.array([list(pcy.GetConformer().GetAtomPosition(i)) for i in range(pcy.GetNumAtoms())])\npsym = [a.GetSymbol() for a in pcy.GetAtoms()]\np_idx = next(a.GetIdx() for a in pcy.GetAtoms() if a.GetSymbol()=='P')\nipso = [x.GetIdx() for x in pcy.GetAtomWithIdx(p_idx).GetNeighbors()]\nv_lp = norm(ppos[p_idx] - np.mean(ppos[ipso], axis=0))\nRp = rotmat_from_to(v_lp, [0,1,0.0])\nppos_r = (Rp @ ppos.T).T\nP_target = np.array([0.0, -2.40, 0.0])\nppos_r = ppos_r + (P_target - ppos_r[p_idx])\n\nhyd = 1.55*np.array([0.5, 0.0, -np.sin(np.radians(60))])\ncore_atoms = [('Rh', np.zeros(3)), ('H', hyd)] + lig_atoms\n\ndef clash_score(A, B):\n    s = []\n    for sa,pa in A:\n        if sa=='Rh': continue\n        for sb,pb in B:\n            if sb=='Rh': continue\n            d = np.linalg.norm(pa-pb)\n            if d < 0.72*(VDW[sa]+VDW[sb]): s.append((sa,sb,round(float(d),2)))\n    return s\n\n# PCy3 twist first (vs core only)\nbest=None\nfor angd in range(0,360,10):\n    rot = [(sy, rot_about(p, P_target, [0,1,0.0], np.radians(angd))) for sy,p in zip(psym,ppos_r)]\n    sc = clash_score(rot, core_atoms)\n    if best is None or len(sc)<len(best[0]): best=(sc,angd,rot)\nprint(\"PCy3 twist:\", best[1], \"clashes:\", best[0][:10], \"n=\",len(best[0]))\npcy_atoms = best[2]\n\n# ================= triflate =================\notf = Chem.MolFromSmiles(\"O=S(=O)([O-])C(F)(F)F\"); embed_opt(otf, seed=11)\ntpos = np.array([list(otf.GetConformer().GetAtomPosition(i)) for i in range(otf.GetNumAtoms())])\ntsym = [a.GetSymbol() for a in otf.GetAtoms()]\ns_idx = next(a.GetIdx() for a in otf.GetAtoms() if a.GetSymbol()=='S')\nom_idx = next(a.GetIdx() for a in otf.GetAtoms() if a.GetSymbol()=='O' and a.GetFormalCharge()==-1)\no_t = 2.15*np.array([0.5, 0.0, np.sin(np.radians(60))])\nd_or = norm(-o_t)\nt_ax = norm(np.cross(d_or, [0,1,0]))\nw_t = np.cos(np.radians(132))*d_or + np.sin(np.radians(132))*t_ax\nRt = rotmat_from_to(norm(tpos[s_idx]-tpos[om_idx]), w_t)\ntpos_r = (Rt @ (tpos - tpos[om_idx]).T).T + o_t\n\nbest=None\nfor angd in range(0,360,10):\n    rot = [(sy, rot_about(p, o_t, norm(o_t), np.radians(angd))) for sy,p in zip(tsym,tpos_r)]\n    sc = clash_score(rot, core_atoms+pcy_atoms)\n    if best is None or len(sc)<len(best[0]): best=(sc,angd,rot)\nprint(\"OTf twist:\", best[1], \"clashes:\", best[0][:12], \"n=\",len(best[0]))\notf_atoms = best[2]\n\nall_atoms = [('Rh', np.zeros(3))] + lig_atoms + pcy_atoms + otf_atoms + [('H', hyd)]\nidx_N  = 1 + next(i for i,(s,p) in enumerate(lig_atoms) if s=='N')\nidx_Si = 1 + next(i for i,(s,p) in enumerate(lig_atoms) if s=='Si')\nidx_P  = 1 + len(lig_atoms) + p_idx\nidx_Otf= 1 + len(lig_atoms) + len(pcy_atoms) + om_idx\nidx_H  = len(all_atoms)-1\nprint(\"N atoms:\", len(all_atoms), \"| idx N,Si,P,Otf,H:\", idx_N, idx_Si, idx_P, idx_Otf, idx_H)\nprint(\"Rh distances: N %.2f Si %.2f P %.2f Otf %.2f H %.2f\" % tuple(\n    np.linalg.norm(all_atoms[i][1]) for i in [idx_N, idx_Si, idx_P, idx_Otf, idx_H]))\nwith open('assembled.xyz','w') as f:\n    f.write(f\"{len(all_atoms)}\\nRh(III) kappa2-N,Si silyl-quinoline hydride triflate PCy3\\n\")\n    for s,p in all_atoms:\n        f.write(f\"{s:2s} {p[0]:12.6f} {p[1]:12.6f} {p[2]:12.6f}\\n\")\nprint(Counter(s for s,_ in all_atoms))\nEOF\npython3 build3.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 63713,
+   "output_tokens": 4995,
+   "total_tokens": 68708
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "PCy3 twist: 0 clashes: [('H', 'C', 1.61), ('H', 'H', 1.28), ('H', 'H', 1.55), ('H', 'C', 2.06)] n= 4\nOTf twist: 120 clashes: [('O', 'H', 1.68), ('O', 'H', 1.95), ('F', 'N', 1.77), ('F', 'C', 1.76)] n= 4\nN atoms: 94 | idx N,Si,P,Otf,H: 1 12 39 88 93\nRh distances: N 2.20 Si 2.38 P 2.40 Otf 2.15 H 1.55\nCounter({'H': 50, 'C': 32, 'O': 4, 'F': 3, 'Rh': 1, 'N': 1, 'Si': 1, 'P': 1, 'S': 1})\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:7"
+ },
+ {
+  "type": "AIMessage",
+  "content": "Let me inspect the clashes in detail to understand what's colliding:",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > inspect.py << 'EOF'\nimport numpy as np\n\natoms = []\nwith open('assembled.xyz') as f:\n    lines = f.read().splitlines()\nfor ln in lines[2:]:\n    p = ln.split()\n    atoms.append((p[0], np.array([float(p[1]),float(p[2]),float(p[3])])))\n\nVDW = {'H':1.20,'C':1.70,'N':1.55,'O':1.52,'F':1.47,'P':1.80,'S':1.80,'Si':2.10,'Rh':1.60}\n# fragments: 0 Rh, 1..28 ligand(28), 29..80 pcy3(52), 81..88 otf(8), 93 hydride\ndef frag(i):\n    if i==0: return 'Rh'\n    if i<=28: return 'lig'\n    if i<=80: return 'pcy3'\n    if i<=88: return 'otf'\n    return 'hyd'\n\nprint(\"total\", len(atoms))\nbad=[]\nfor i in range(len(atoms)):\n    for j in range(i+1,len(atoms)):\n        if frag(i)==frag(j): continue\n        d = np.linalg.norm(atoms[i][1]-atoms[j][1])\n        if d < 0.72*(VDW[atoms[i][0]]+VDW[atoms[j][0]]):\n            bad.append((i,atoms[i][0],frag(i),j,atoms[j][0],frag(j),round(d,2)))\nfor b in bad: print(b)\nEOF\npython3 inspect.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 68964,
+   "output_tokens": 3020,
+   "total_tokens": 71984
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "total 94\n(0, 'Rh', 'Rh', 1, 'N', 'lig', np.float64(2.2))\n(0, 'Rh', 'Rh', 12, 'Si', 'lig', np.float64(2.38))\n(0, 'Rh', 'Rh', 23, 'H', 'lig', np.float64(1.69))\n(0, 'Rh', 'Rh', 39, 'P', 'pcy3', np.float64(2.4))\n(0, 'Rh', 'Rh', 88, 'O', 'otf', np.float64(2.15))\n(0, 'Rh', 'Rh', 93, 'H', 'hyd', np.float64(1.55))\n(1, 'N', 'lig', 91, 'F', 'hyd', np.float64(1.77))\n(2, 'C', 'lig', 91, 'F', 'hyd', np.float64(1.76))\n(12, 'Si', 'lig', 29, 'C', 'pcy3', np.float64(1.88))\n(21, 'C', 'lig', 84, 'H', 'otf', np.float64(2.06))\n(22, 'H', 'lig', 88, 'O', 'otf', np.float64(1.68))\n(23, 'H', 'lig', 93, 'H', 'hyd', np.float64(1.22))\n(50, 'C', 'pcy3', 81, 'H', 'otf', np.float64(1.1))\n(50, 'C', 'pcy3', 82, 'H', 'otf', np.float64(1.1))\n(51, 'C', 'pcy3', 83, 'H', 'otf', np.float64(1.1))\n(51, 'C', 'pcy3', 84, 'H', 'otf', np.float64(1.1))\n(53, 'H', 'pcy3', 88, 'O', 'otf', np.float64(1.95))\n(86, 'S', 'otf', 89, 'C', 'hyd', np.float64(1.87))\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:8"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > build4.py << 'EOF'\nimport numpy as np\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem\nfrom collections import Counter\n\ndef norm(v):\n    v = np.asarray(v, float); return v/np.linalg.norm(v)\n\ndef ang(deg): return np.array([np.cos(np.radians(deg)), np.sin(np.radians(deg)), 0.0])\n\ndef rotmat_from_to(a, b):\n    a = norm(a); b = norm(b)\n    v = np.cross(a, b); c = np.dot(a, b)\n    if np.linalg.norm(v) < 1e-9:\n        if c > 0: return np.eye(3)\n        axis = norm(np.cross(a, [1,0,0]) if abs(a[0]) < 0.9 else np.cross(a, [0,1,0]))\n        return 2*np.outer(axis, axis) - np.eye(3)\n    vx = np.array([[0,-v[2],v[1]],[v[2],0,-v[0]],[-v[1],v[0],0]])\n    return np.eye(3) + vx + vx@vx*((1-c)/(np.linalg.norm(v)**2))\n\ndef rot_about(p, p0, axis, angd):\n    axis = norm(axis); x = np.asarray(p, float) - p0\n    return p0 + x*np.cos(angd) + np.cross(axis, x)*np.sin(angd) + axis*np.dot(axis, x)*(1-np.cos(angd))\n\ndef embed_opt(mol, seed=42):\n    ps = AllChem.ETKDGv3(); ps.randomSeed = seed\n    assert AllChem.EmbedMolecule(mol, ps) == 0\n    try: AllChem.MMFFOptimizeMolecule(mol)\n    except Exception:\n        try: AllChem.UFFOptimizeMolecule(mol)\n        except Exception: pass\n    return mol\n\nVDW = {'H':1.20,'C':1.70,'N':1.55,'O':1.52,'F':1.47,'P':1.80,'S':1.80,'Si':2.10,'Rh':1.60}\n\ndef penalty(A, B):\n    \"\"\"sum of max(0, r0-d)^2 for cross pairs, Rh exempt\"\"\"\n    tot = 0.0\n    for sa,pa in A:\n        if sa=='Rh': continue\n        for sb,pb in B:\n            if sb=='Rh': continue\n            r0 = 0.80*(VDW[sa]+VDW[sb])\n            d = np.linalg.norm(pa-pb)\n            if d < r0: tot += (r0-d)**2\n    return tot\n\ndef methyl_Hs(M, u, phi0):\n    \"\"\"3 H positions for methyl carbon M, bond dir u (X->M), rotation phi0 (deg)\"\"\"\n    e1 = norm(np.cross(u, [0,0,1.0]) if abs(u[2])<0.9 else np.cross(u,[1,0,0]))\n    e2 = norm(np.cross(u, e1))\n    out = []\n    for k in range(3):\n        ph = np.radians(phi0 + 120*k)\n        hd = (1.0/3.0)*u + 0.9428*(np.cos(ph)*e1 + np.sin(ph)*e2)\n        out.append(M + 1.09*norm(hd))\n    return out\n\n# ================= chelate ligand =================\na_t = np.array([0.0, 2.20, 0.0])\nb_t = 2.38*np.array([-np.sin(np.radians(82.0)), np.cos(np.radians(82.0)), 0.0])\ndef O_pos(th1): return a_t + 1.33*ang(th1) + 1.36*ang(th1+61.0)\nlo, hi = 130.0, 165.0\nfor _ in range(60):\n    mid = 0.5*(lo+hi)\n    if np.linalg.norm(O_pos(mid)-b_t) > 1.66: lo = mid\n    else: hi = mid\nth1 = 0.5*(lo+hi)\nN1 = a_t; C2 = a_t + 1.33*ang(th1); O = O_pos(th1); Si = b_t.copy()\nC3  = C2 + 1.33*ang(th1-60);  C4  = C3 + 1.33*ang(th1-120)\nC4a = C4 + 1.33*ang(th1-180); C8a = C4a + 1.33*ang(th1-240)\nd0 = th1-240\nC5 = C4a + 1.33*ang(d0+120); C6 = C5 + 1.33*ang(d0+60)\nC7 = C6 + 1.33*ang(d0);      C8 = C7 + 1.33*ang(d0-60)\ncen_py = np.mean([N1,C2,C3,C4,C4a,C8a], axis=0)\ncen_bz = np.mean([C4a,C5,C6,C7,C8,C8a], axis=0)\n\nlig = [('N',N1),('C',C2),('C',C3),('C',C4),('C',C4a),('C',C8a),\n       ('C',C5),('C',C6),('C',C7),('C',C8),('O',O),('Si',Si)]\nfor X, cen in [(C3,cen_py),(C5,cen_bz),(C6,cen_bz),(C7,cen_bz)]:\n    lig.append(('H', X + 1.08*norm(X-cen)))\n# methyl carbons (H's added later with optimized rotation)\nu_me4 = norm(C4-cen_py); Me4 = C4 + 1.50*u_me4\nu_me8 = norm(C8-cen_bz); Me8 = C8 + 1.50*u_me8\nlig.append(('C', Me4)); lig.append(('C', Me8))\n# Si methyls\nu1 = norm(O-Si); u2 = norm(-Si)\nalpha = np.arccos(np.clip(np.dot(u1,u2),-1,1))\nmb = norm(u1+u2); q = norm(np.cross(u1,u2))\nxx = 1.0/(3.0*np.cos(alpha/2)); xx = min(xx,0.95); yy = np.sqrt(max(1-xx*xx,0.2))\nu3, u4 = -xx*mb+yy*q, -xx*mb-yy*q\nSiMe = []\nfor uu in (u3,u4):\n    cpos = Si + 1.88*uu\n    SiMe.append((cpos, uu))\n    lig.append(('C', cpos))\n# placeholder methyl H's at default rotation (will re-optimize)\ni_me4 = 16; i_me8 = 17; i_sime = [18,19]   # lig indices\nfor k in range(3): lig.append(('H', np.zeros(3)))   # 4-Me: idx 20,21,22\nfor k in range(3): lig.append(('H', np.zeros(3)))   # 8-Me: idx 23,24,25\nfor k in range(3): lig.append(('H', np.zeros(3)))   # SiMe1: 26,27,28\nfor k in range(3): lig.append(('H', np.zeros(3)))   # SiMe2: 29,30,31\ndef set_me_Hs(lig, start, M, u, phi0):\n    for k,p in enumerate(methyl_Hs(M, u, phi0)):\n        lig[start+k] = ('H', p)\nset_me_Hs(lig, 20, Me4, u_me4, 0); set_me_Hs(lig, 23, Me8, u_me8, 0)\nset_me_Hs(lig, 26, SiMe[0][0], SiMe[0][1], 30); set_me_Hs(lig, 29, SiMe[1][0], SiMe[1][1], 30)\n\nhyd = 1.55*np.array([0.5, 0.0, -np.sin(np.radians(60))])\ncore = [('Rh', np.zeros(3)), ('H', hyd)] + lig\n\n# ================= PCy3 =================\npcy = Chem.MolFromSmiles(\"C1CCCCC1P(C2CCCCC2)C3CCCCC3\")\npcy = Chem.AddHs(pcy); embed_opt(pcy, seed=7)\nppos = np.array([list(pcy.GetConformer().GetAtomPosition(i)) for i in range(pcy.GetNumAtoms())])\npsym = [a.GetSymbol() for a in pcy.GetAtoms()]\np_idx = next(a.GetIdx() for a in pcy.GetAtoms() if a.GetSymbol()=='P')\nipso = [x.GetIdx() for x in pcy.GetAtomWithIdx(p_idx).GetNeighbors()]\nRp = rotmat_from_to(norm(ppos[p_idx]-np.mean(ppos[ipso],axis=0)), [0,1,0.0])\nppos_r = (Rp @ ppos.T).T\nP_target = np.array([0.0, -2.40, 0.0])\nppos_r = ppos_r + (P_target - ppos_r[p_idx])\n\nbest=None\nfor angd in range(0,360,10):\n    rot = [(sy, rot_about(p, P_target, [0,1,0.0], np.radians(angd))) for sy,p in zip(psym,ppos_r)]\n    sc = penalty(rot, core)\n    if best is None or sc<best[0]: best=(sc,angd,rot)\nprint(\"PCy3 twist:\", best[1], \"penalty %.2f\"%best[0])\npcy_atoms = best[2]\n\n# ================= triflate =================\notf = Chem.MolFromSmiles(\"O=S(=O)([O-])C(F)(F)F\"); embed_opt(otf, seed=11)\ntpos = np.array([list(otf.GetConformer().GetAtomPosition(i)) for i in range(otf.GetNumAtoms())])\ntsym = [a.GetSymbol() for a in otf.GetAtoms()]\ns_idx = next(a.GetIdx() for a in otf.GetAtoms() if a.GetSymbol()=='S')\nom_idx = next(a.GetIdx() for a in otf.GetAtoms() if a.GetSymbol()=='O' and a.GetFormalCharge()==-1)\no_t = 2.15*np.array([0.5, 0.0, np.sin(np.radians(60))])\nd_or = norm(-o_t)\nt_ax = norm(np.cross(d_or, [0,1,0]))\nw_t = np.cos(np.radians(132))*d_or + np.sin(np.radians(132))*t_ax\nRt = rotmat_from_to(norm(tpos[s_idx]-tpos[om_idx]), w_t)\ntpos_r = (Rt @ (tpos - tpos[om_idx]).T).T + o_t\n\nbest=None\nfor angd in range(0,360,10):\n    rot = [(sy, rot_about(p, o_t, norm(o_t), np.radians(angd))) for sy,p in zip(tsym,tpos_r)]\n    sc = penalty(rot, core+pcy_atoms)\n    if best is None or sc<best[0]: best=(sc,angd,rot)\nprint(\"OTf twist:\", best[1], \"penalty %.2f\"%best[0])\notf_atoms = best[2]\n\nothers = [('Rh', np.zeros(3)), ('H', hyd)] + pcy_atoms + otf_atoms\n# optimize methyl rotations\ndef opt_me(lig, start, M, u, others, lig_excl):\n    best=None\n    for ph in range(0,120,5):\n        set_me_Hs(lig, start, M, u, ph)\n        env = others + [a for i,a in enumerate(lig) if i not in lig_excl]\n        sc = penalty([lig[start+k] for k in range(3)], env)\n        if best is None or sc<best[0]: best=(sc,ph)\n    set_me_Hs(lig, start, M, u, best[1])\n    print(f\"  Me@{start}: phi={best[1]} penalty %.3f\"%best[0])\nopt_me(lig, 23, Me8, u_me8, others, {23,24,25,9})          # 8-Me (C8 idx9)\nopt_me(lig, 20, Me4, u_me4, others, {20,21,22,3})          # 4-Me (C4 idx3)\nopt_me(lig, 26, SiMe[0][0], SiMe[0][1], others, {26,27,28,11})\nopt_me(lig, 29, SiMe[1][0], SiMe[1][1], others, {29,30,31,11})\n\n# final report of residual close contacts\nall_atoms = [('Rh', np.zeros(3))] + lig + pcy_atoms + otf_atoms + [('H', hyd)]\nnL = len(lig)\ndef frag(i):\n    if i==0: return 'Rh'\n    if i<=nL: return 'lig'\n    if i<=nL+len(pcy_atoms): return 'pcy3'\n    if i<=nL+len(pcy_atoms)+len(otf_atoms): return 'otf'\n    return 'hyd'\nbad=[]\nfor i in range(len(all_atoms)):\n    for j in range(i+1,len(all_atoms)):\n        if frag(i)==frag(j): continue\n        si,sj = all_atoms[i][0], all_atoms[j][0]\n        if si=='Rh' or sj=='Rh': continue\n        d = np.linalg.norm(all_atoms[i][1]-all_atoms[j][1])\n        if d < 0.80*(VDW[si]+VDW[sj]): bad.append((i,si,frag(i),j,sj,frag(j),round(float(d),2)))\nprint(\"residual contacts (<0.8*vdW):\")\nfor b in sorted(bad,key=lambda x:x[-1]): print(\"  \",b)\n\nidx_N  = 1 + next(i for i,(s,p) in enumerate(lig) if s=='N')\nidx_Si = 1 + next(i for i,(s,p) in enumerate(lig) if s=='Si')\nidx_P  = 1 + nL + p_idx\nidx_Otf= 1 + nL + len(pcy_atoms) + om_idx\nidx_H  = len(all_atoms)-1\nprint(\"N atoms:\", len(all_atoms), \"| idx N,Si,P,Otf,H:\", idx_N, idx_Si, idx_P, idx_Otf, idx_H)\nwith open('assembled.xyz','w') as f:\n    f.write(f\"{len(all_atoms)}\\nassembled\\n\")\n    for s,p in all_atoms:\n        f.write(f\"{s:2s} {p[0]:12.6f} {p[1]:12.6f} {p[2]:12.6f}\\n\")\nprint(Counter(s for s,_ in all_atoms))\nEOF\npython3 build4.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 72509,
+   "output_tokens": 13475,
+   "total_tokens": 85984
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "PCy3 twist: 80 penalty 1.06\nOTf twist: 120 penalty 1.70\n  Me@23: phi=115 penalty 4.725\n  Me@20: phi=50 penalty 4.539\n  Me@26: phi=30 penalty 4.549\n  Me@29: phi=85 penalty 4.665\nresidual contacts (<0.8*vdW):\n   (30, 'H', 'lig', 72, 'H', 'pcy3', 1.61)\n   (26, 'H', 'lig', 93, 'H', 'hyd', 1.63)\n   (84, 'H', 'pcy3', 93, 'H', 'hyd', 1.71)\n   (2, 'C', 'lig', 91, 'F', 'otf', 1.76)\n   (1, 'N', 'lig', 91, 'F', 'otf', 1.77)\n   (20, 'C', 'lig', 72, 'H', 'pcy3', 1.83)\n   (28, 'H', 'lig', 73, 'H', 'pcy3', 1.83)\n   (26, 'H', 'lig', 88, 'O', 'otf', 1.86)\n   (29, 'H', 'lig', 73, 'H', 'pcy3', 1.89)\n   (32, 'H', 'lig', 90, 'F', 'otf', 1.97)\n   (12, 'Si', 'lig', 72, 'H', 'pcy3', 1.99)\n   (61, 'H', 'pcy3', 88, 'O', 'otf', 2.03)\n   (19, 'C', 'lig', 73, 'H', 'pcy3', 2.13)\n   (29, 'H', 'lig', 45, 'C', 'pcy3', 2.28)\n   (18, 'C', 'lig', 93, 'H', 'hyd', 2.29)\n   (19, 'C', 'lig', 72, 'H', 'pcy3', 2.29)\n   (3, 'C', 'lig', 91, 'F', 'otf', 2.32)\n   (6, 'C', 'lig', 91, 'F', 'otf', 2.33)\n   (20, 'C', 'lig', 90, 'F', 'otf', 2.42)\n   (18, 'C', 'lig', 88, 'O', 'otf', 2.45)\n   (19, 'C', 'lig', 45, 'C', 'pcy3', 2.69)\n   (12, 'Si', 'lig', 45, 'C', 'pcy3', 2.88)\nN atoms: 94 | idx N,Si,P,Otf,H: 1 12 39 88 93\nCounter({'H': 50, 'C': 32, 'O': 4, 'F': 3, 'Rh': 1, 'N': 1, 'Si': 1, 'P': 1, 'S': 1})\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:9"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > build5.py << 'EOF'\nimport numpy as np\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem\nfrom collections import Counter\n\ndef norm(v):\n    v = np.asarray(v, float); n = np.linalg.norm(v); return v/n if n>0 else v\n\ndef ang2(deg): return np.array([np.cos(np.radians(deg)), np.sin(np.radians(deg)), 0.0])\n\ndef rotmat_from_to(a, b):\n    a = norm(a); b = norm(b)\n    v = np.cross(a, b); c = np.dot(a, b)\n    if np.linalg.norm(v) < 1e-9:\n        if c > 0: return np.eye(3)\n        axis = norm(np.cross(a, [1,0,0]) if abs(a[0]) < 0.9 else np.cross(a, [0,1,0]))\n        return 2*np.outer(axis, axis) - np.eye(3)\n    vx = np.array([[0,-v[2],v[1]],[v[2],0,-v[0]],[-v[1],v[0],0]])\n    return np.eye(3) + vx + vx@vx*((1-c)/(np.linalg.norm(v)**2))\n\ndef rot_axis(P, p0, axis, angd):\n    \"\"\"rotate points array P about axis through p0 by angd (radians)\"\"\"\n    axis = norm(axis); X = P - p0\n    return p0 + X*np.cos(angd) + np.cross(axis, X)*np.sin(angd) + axis*(X@axis)*(1-np.cos(angd))\n\ndef embed_opt(mol, seed=42):\n    ps = AllChem.ETKDGv3(); ps.randomSeed = seed\n    assert AllChem.EmbedMolecule(mol, ps) == 0\n    try: AllChem.MMFFOptimizeMolecule(mol)\n    except Exception:\n        try: AllChem.UFFOptimizeMolecule(mol)\n        except Exception: pass\n    return mol\n\nVDW = {'H':1.20,'C':1.70,'N':1.55,'O':1.52,'F':1.47,'P':1.80,'S':1.80,'Si':2.10,'Rh':1.60}\n\n# ---------- chelate ligand base (delta=0) ----------\na_t = np.array([0.0, 2.20, 0.0])\nb_t = 2.38*np.array([-np.sin(np.radians(82.0)), np.cos(np.radians(82.0)), 0.0])\ndef O_pos(th1): return a_t + 1.33*ang2(th1) + 1.36*ang2(th1+61.0)\nlo, hi = 130.0, 165.0\nfor _ in range(60):\n    mid = 0.5*(lo+hi)\n    if np.linalg.norm(O_pos(mid)-b_t) > 1.66: lo = mid\n    else: hi = mid\nth1 = 0.5*(lo+hi)\nN1 = a_t; C2 = a_t + 1.33*ang2(th1); O = O_pos(th1); Si = b_t.copy()\nC3  = C2 + 1.33*ang2(th1-60);  C4  = C3 + 1.33*ang2(th1-120)\nC4a = C4 + 1.33*ang2(th1-180); C8a = C4a + 1.33*ang2(th1-240)\nd0 = th1-240\nC5 = C4a + 1.33*ang2(d0+120); C6 = C5 + 1.33*ang2(d0+60)\nC7 = C6 + 1.33*ang2(d0);      C8 = C7 + 1.33*ang2(d0-60)\ncen_py = np.mean([N1,C2,C3,C4,C4a,C8a], axis=0)\ncen_bz = np.mean([C4a,C5,C6,C7,C8,C8a], axis=0)\nlig_base = [('N',N1),('C',C2),('C',C3),('C',C4),('C',C4a),('C',C8a),\n            ('C',C5),('C',C6),('C',C7),('C',C8),('O',O),('Si',Si)]\nfor X, cen in [(C3,cen_py),(C5,cen_bz),(C6,cen_bz),(C7,cen_bz)]:\n    lig_base.append(('H', X + 1.08*norm(X-cen)))\nu_me4 = norm(C4-cen_py); Me4 = C4 + 1.50*u_me4\nu_me8 = norm(C8-cen_bz); Me8 = C8 + 1.50*u_me8\nu1 = norm(O-Si); u2 = norm(-Si)\nalpha = np.arccos(np.clip(np.dot(u1,u2),-1,1))\nmb = norm(u1+u2); q = norm(np.cross(u1,u2))\nxx = 1.0/(3.0*np.cos(alpha/2)); xx = min(xx,0.95); yy = np.sqrt(max(1-xx*xx,0.2))\nmethyls = [(Me4, u_me4), (Me8, u_me8)]\nfor uu in (-xx*mb+yy*q, -xx*mb-yy*q):\n    methyls.append((Si + 1.88*uu, uu))\nfor M,u in methyls: lig_base.append(('C', M))\nlig_syms = [s for s,_ in lig_base]\nlig_P0 = np.array([p for _,p in lig_base])          # (20,3)\nME = [(np.array(M), np.array(u)) for M,u in methyls]\n\ndef lig_atoms(delta, phis):\n    P = rot_axis(lig_P0, np.zeros(3), np.array([0,1,0.0]), np.radians(delta))\n    out = list(zip(lig_syms, P))\n    for (M0,u0),ph in zip(ME, phis):\n        M = rot_axis(M0[None,:], np.zeros(3), np.array([0,1,0.0]), np.radians(delta))[0]\n        u = rot_axis(u0[None,:], np.zeros(3), np.array([0,1,0.0]), np.radians(delta))[0]\n        e1 = norm(np.cross(u, [0,0,1.0]) if abs(u[2])<0.9 else np.cross(u,[1,0,0]))\n        e2 = norm(np.cross(u, e1))\n        for k in range(3):\n            pkk = np.radians(ph + 120*k)\n            hd = (1.0/3.0)*u + 0.9428*(np.cos(pkk)*e1 + np.sin(pkk)*e2)\n            out.append(('H', M + 1.09*norm(hd)))\n    return out\n\n# ---------- PCy3 base ----------\npcy = Chem.MolFromSmiles(\"C1CCCCC1P(C2CCCCC2)C3CCCCC3\")\npcy = Chem.AddHs(pcy); embed_opt(pcy, seed=7)\nppos = np.array([list(pcy.GetConformer().GetAtomPosition(i)) for i in range(pcy.GetNumAtoms())])\npsym = [a.GetSymbol() for a in pcy.GetAtoms()]\np_idx = next(a.GetIdx() for a in pcy.GetAtoms() if a.GetSymbol()=='P')\nipso = [x.GetIdx() for x in pcy.GetAtomWithIdx(p_idx).GetNeighbors()]\nRp = rotmat_from_to(norm(ppos[p_idx]-np.mean(ppos[ipso],axis=0)), [0,1,0.0])\nppos_r = (Rp @ ppos.T).T\nP_target = np.array([0.0, -2.40, 0.0])\nppos_r = ppos_r + (P_target - ppos_r[p_idx])\ndef pcy_atoms(tau):\n    return list(zip(psym, rot_axis(ppos_r, P_target, np.array([0,1,0.0]), np.radians(tau))))\n\n# ---------- triflate base ----------\notf = Chem.MolFromSmiles(\"O=S(=O)([O-])C(F)(F)F\"); embed_opt(otf, seed=11)\ntpos = np.array([list(otf.GetConformer().GetAtomPosition(i)) for i in range(otf.GetNumAtoms())])\ntsym = [a.GetSymbol() for a in otf.GetAtoms()]\ns_idx = next(a.GetIdx() for a in otf.GetAtoms() if a.GetSymbol()=='S')\nom_idx = next(a.GetIdx() for a in otf.GetAtoms() if a.GetSymbol()=='O' and a.GetFormalCharge()==-1)\no_t = 2.15*np.array([0.5, 0.0, np.sin(np.radians(60))])\nd_or = norm(-o_t); t_ax = norm(np.cross(d_or, [0,1,0]))\nw_t = np.cos(np.radians(132))*d_or + np.sin(np.radians(132))*t_ax\nRt = rotmat_from_to(norm(tpos[s_idx]-tpos[om_idx]), w_t)\ntpos_r = (Rt @ (tpos - tpos[om_idx]).T).T + o_t\ndef otf_atoms(tau):\n    return list(zip(tsym, rot_axis(tpos_r, o_t, norm(o_t), np.radians(tau))))\n\nhyd = ('H', 1.55*np.array([0.5, 0.0, -np.sin(np.radians(60))]))\nrh  = ('Rh', np.zeros(3))\n\ndef pair_pen(PA, RA, PB, RB):\n    D = np.linalg.norm(PA[:,None,:]-PB[None,:,:], axis=-1)\n    R0 = 0.80*(RA[:,None]+RB[None,:])\n    diff = np.maximum(0.0, R0-D)\n    return float((diff**2).sum())\n\ndef total_pen(delta, tau_o, tau_p, phis):\n    la = lig_atoms(delta, phis); pa = pcy_atoms(tau_p); oa = otf_atoms(tau_o)\n    frags = [la, pa, oa]\n    tot = 0.0\n    for i in range(len(frags)):\n        for j in range(i+1,len(frags)):\n            PA = np.array([p for _,p in frags[i]]); RA = np.array([VDW[s] for s,_ in frags[i]])\n            PB = np.array([p for _,p in frags[j]]); RB = np.array([VDW[s] for s,_ in frags[j]])\n            tot += pair_pen(PA, RA, PB, RB)\n    # vs hydride\n    for fr in frags:\n        PA = np.array([p for _,p in fr]); RA = np.array([VDW[s] for s,_ in fr])\n        tot += pair_pen(PA, RA, hyd[1][None,:], np.array([VDW['H']]))\n    return tot\n\ndelta, tau_o, tau_p, phis = 0.0, 0.0, 0.0, [0.0,0.0,30.0,30.0]\nprint(\"initial penalty %.2f\" % total_pen(delta,tau_o,tau_p,phis))\nfor it in range(3):\n    cands = [(d, total_pen(d,tau_o,tau_p,phis)) for d in range(-40,41,2)]\n    delta = min(cands, key=lambda t:t[1])[0]\n    cands = [(t, total_pen(delta,t,tau_p,phis)) for t in range(0,360,5)]\n    tau_o = min(cands, key=lambda t:t[1])[0]\n    cands = [(t, total_pen(delta,tau_o,t,phis)) for t in range(0,360,5)]\n    tau_p = min(cands, key=lambda t:t[1])[0]\n    for mi in range(4):\n        cands=[]\n        for ph in range(0,120,5):\n            p2 = list(phis); p2[mi]=ph\n            cands.append((p2, total_pen(delta,tau_o,tau_p,p2)))\n        phis = min(cands, key=lambda t:t[1])[0]\n    print(f\"iter {it}: delta={delta} tau_o={tau_o} tau_p={tau_p} phis={phis} penalty %.3f\" % total_pen(delta,tau_o,tau_p,phis))\n\n# ---------- assemble ----------\nall_atoms = [rh] + lig_atoms(delta, phis) + pcy_atoms(tau_p) + otf_atoms(tau_o) + [hyd]\nnL = 20 + 12\ndef frag(i):\n    if i==0: return 'Rh'\n    if i<=nL: return 'lig'\n    if i<=nL+52: return 'pcy3'\n    if i<=nL+60: return 'otf'\n    return 'hyd'\nbad=[]\nfor i in range(len(all_atoms)):\n    for j in range(i+1,len(all_atoms)):\n        if frag(i)==frag(j): continue\n        si,sj = all_atoms[i][0], all_atoms[j][0]\n        if si=='Rh' or sj=='Rh': continue\n        d = np.linalg.norm(all_atoms[i][1]-all_atoms[j][1])\n        if d < 0.78*(VDW[si]+VDW[sj]): bad.append((round(float(d),2),i,si,frag(i),j,sj,frag(j)))\nprint(\"residual contacts (<0.78*vdW):\", len(bad))\nfor b in sorted(bad)[:15]: print(\"  \",b)\n\nidx_N  = 1 + lig_syms.index('N')\nidx_Si = 1 + lig_syms.index('Si')\nidx_P  = 1 + nL + p_idx\nidx_Otf= 1 + nL + 52 + om_idx\nidx_H  = len(all_atoms)-1\nprint(\"N atoms:\", len(all_atoms), \"| idx N,Si,P,Otf,H:\", idx_N, idx_Si, idx_P, idx_Otf, idx_H)\nprint(\"Rh distances: N %.2f Si %.2f P %.2f Otf %.2f H %.2f\" % tuple(\n    np.linalg.norm(all_atoms[i][1]) for i in [idx_N, idx_Si, idx_P, idx_Otf, idx_H]))\nwith open('assembled.xyz','w') as f:\n    f.write(f\"{len(all_atoms)}\\nassembled\\n\")\n    for s,p in all_atoms:\n        f.write(f\"{s:2s} {p[0]:12.6f} {p[1]:12.6f} {p[2]:12.6f}\\n\")\nprint(Counter(s for s,_ in all_atoms))\nnp.save('state.npy', np.array([delta,tau_o,tau_p]+list(phis)))\nEOF\npython3 build5.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 86748,
+   "output_tokens": 8725,
+   "total_tokens": 95473
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "Traceback (most recent call last):\n  File \"/h/400/skaxu/elagenteworkdir/mol_0058_004abd60_kimi-k3/build5.py\", line 140, in <module>\n    print(\"initial penalty %.2f\" % total_pen(delta,tau_o,tau_p,phis))\n                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/h/400/skaxu/elagenteworkdir/mol_0058_004abd60_kimi-k3/build5.py\", line 125, in total_pen\n    la = lig_atoms(delta, phis); pa = pcy_atoms(tau_p); oa = otf_atoms(tau_o)\n         ^^^^^^^^^^^^^^^^^^^^^^\n  File \"/h/400/skaxu/elagenteworkdir/mol_0058_004abd60_kimi-k3/build5.py\", line 74, in lig_atoms\n    P = rot_axis(lig_P0, np.zeros(3), np.array([0,1,0.0]), np.radians(delta))\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/h/400/skaxu/elagenteworkdir/mol_0058_004abd60_kimi-k3/build5.py\", line 24, in rot_axis\n    return p0 + X*np.cos(angd) + np.cross(axis, X)*np.sin(angd) + axis*(X@axis)*(1-np.cos(angd))\n                                                                  ~~~~^^~~~~~~~\nValueError: operands could not be broadcast together with shapes (3,) (20,) \n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:10"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "sed -i 's/return p0 + X\\*np.cos(angd) + np.cross(axis, X)\\*np.sin(angd) + axis\\*(X@axis)\\*(1-np.cos(angd))/return p0 + X*np.cos(angd) + np.cross(axis, X)*np.sin(angd) + axis[None,:]*((X@axis)[:,None])*(1-np.cos(angd))/' build5.py && python3 build5.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 95828,
+   "output_tokens": 202,
+   "total_tokens": 96030
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "initial penalty 23.91\niter 0: delta=36 tau_o=50 tau_p=110 phis=[0, 60, 5, 100] penalty 5.751\niter 1: delta=40 tau_o=40 tau_p=120 phis=[0, 50, 0, 100] penalty 5.023\niter 2: delta=40 tau_o=40 tau_p=120 phis=[0, 50, 0, 100] penalty 5.023\nresidual contacts (<0.78*vdW): 22\n   (1.14, 26, 'H', 'lig', 93, 'H', 'hyd')\n   (1.21, 24, 'H', 'lig', 93, 'H', 'hyd')\n   (1.4, 18, 'C', 'lig', 93, 'H', 'hyd')\n   (1.68, 10, 'C', 'lig', 91, 'F', 'otf')\n   (1.74, 26, 'H', 'lig', 91, 'F', 'otf')\n   (1.77, 18, 'C', 'lig', 91, 'F', 'otf')\n   (1.82, 30, 'H', 'lig', 72, 'H', 'pcy3')\n   (1.83, 20, 'C', 'lig', 72, 'H', 'pcy3')\n   (1.84, 29, 'H', 'lig', 73, 'H', 'pcy3')\n   (1.91, 6, 'C', 'lig', 90, 'F', 'otf')\n   (1.93, 25, 'H', 'lig', 91, 'F', 'otf')\n   (1.98, 1, 'N', 'lig', 90, 'F', 'otf')\n   (1.99, 12, 'Si', 'lig', 72, 'H', 'pcy3')\n   (2.04, 61, 'H', 'pcy3', 85, 'O', 'otf')\n   (2.13, 19, 'C', 'lig', 73, 'H', 'pcy3')\nN atoms: 94 | idx N,Si,P,Otf,H: 1 12 39 88 93\nRh distances: N 2.20 Si 2.38 P 2.40 Otf 2.15 H 1.55\nCounter({'H': 50, 'C': 32, 'O': 4, 'F': 3, 'Rh': 1, 'N': 1, 'Si': 1, 'P': 1, 'S': 1})\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:11"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > build6.py << 'EOF'\nimport numpy as np\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem\nfrom collections import Counter\n\ndef norm(v):\n    v = np.asarray(v, float); n = np.linalg.norm(v); return v/n if n>0 else v\n\ndef ang2(deg): return np.array([np.cos(np.radians(deg)), np.sin(np.radians(deg)), 0.0])\n\ndef rotmat_from_to(a, b):\n    a = norm(a); b = norm(b)\n    v = np.cross(a, b); c = np.dot(a, b)\n    if np.linalg.norm(v) < 1e-9:\n        if c > 0: return np.eye(3)\n        axis = norm(np.cross(a, [1,0,0]) if abs(a[0]) < 0.9 else np.cross(a, [0,1,0]))\n        return 2*np.outer(axis, axis) - np.eye(3)\n    vx = np.array([[0,-v[2],v[1]],[v[2],0,-v[0]],[-v[1],v[0],0]])\n    return np.eye(3) + vx + vx@vx*((1-c)/(np.linalg.norm(v)**2))\n\ndef rot_axis(P, p0, axis, angd):\n    axis = norm(axis); X = P - p0\n    return p0 + X*np.cos(angd) + np.cross(axis, X)*np.sin(angd) + axis[None,:]*((X@axis)[:,None])*(1-np.cos(angd))\n\ndef embed_opt(mol, seed=42):\n    ps = AllChem.ETKDGv3(); ps.randomSeed = seed\n    assert AllChem.EmbedMolecule(mol, ps) == 0\n    try: AllChem.MMFFOptimizeMolecule(mol)\n    except Exception:\n        try: AllChem.UFFOptimizeMolecule(mol)\n        except Exception: pass\n    return mol\n\nVDW = {'H':1.20,'C':1.70,'N':1.55,'O':1.52,'F':1.47,'P':1.80,'S':1.80,'Si':2.10,'Rh':1.60}\n\n# ---------- chelate ligand base ----------\na_t = np.array([0.0, 2.20, 0.0])\nb_t = 2.38*np.array([-np.sin(np.radians(82.0)), np.cos(np.radians(82.0)), 0.0])\ndef O_pos(th1): return a_t + 1.33*ang2(th1) + 1.36*ang2(th1+61.0)\nlo, hi = 130.0, 165.0\nfor _ in range(60):\n    mid = 0.5*(lo+hi)\n    if np.linalg.norm(O_pos(mid)-b_t) > 1.66: lo = mid\n    else: hi = mid\nth1 = 0.5*(lo+hi)\nN1 = a_t; C2 = a_t + 1.33*ang2(th1); O = O_pos(th1); Si = b_t.copy()\nC3  = C2 + 1.33*ang2(th1-60);  C4  = C3 + 1.33*ang2(th1-120)\nC4a = C4 + 1.33*ang2(th1-180); C8a = C4a + 1.33*ang2(th1-240)\nd0 = th1-240\nC5 = C4a + 1.33*ang2(d0+120); C6 = C5 + 1.33*ang2(d0+60)\nC7 = C6 + 1.33*ang2(d0);      C8 = C7 + 1.33*ang2(d0-60)\ncen_py = np.mean([N1,C2,C3,C4,C4a,C8a], axis=0)\ncen_bz = np.mean([C4a,C5,C6,C7,C8,C8a], axis=0)\nlig_base = [('N',N1),('C',C2),('C',C3),('C',C4),('C',C4a),('C',C8a),\n            ('C',C5),('C',C6),('C',C7),('C',C8),('O',O),('Si',Si)]\nfor X, cen in [(C3,cen_py),(C5,cen_bz),(C6,cen_bz),(C7,cen_bz)]:\n    lig_base.append(('H', X + 1.08*norm(X-cen)))\nu_me4 = norm(C4-cen_py); Me4 = C4 + 1.50*u_me4\nu_me8 = norm(C8-cen_bz); Me8 = C8 + 1.50*u_me8\nu1 = norm(O-Si); u2 = norm(-Si)\nalpha = np.arccos(np.clip(np.dot(u1,u2),-1,1))\nmb = norm(u1+u2); q = norm(np.cross(u1,u2))\nxx = 1.0/(3.0*np.cos(alpha/2)); xx = min(xx,0.95); yy = np.sqrt(max(1-xx*xx,0.2))\nmethyls = [(Me4, u_me4), (Me8, u_me8)]\nfor uu in (-xx*mb+yy*q, -xx*mb-yy*q):\n    methyls.append((Si + 1.88*uu, uu))\nfor M,u in methyls: lig_base.append(('C', M))\nlig_syms = [s for s,_ in lig_base]\nlig_P0 = np.array([p for _,p in lig_base])\nME = [(np.array(M), np.array(u)) for M,u in methyls]\nYAX = np.array([0,1,0.0])\n\ndef lig_atoms(delta, phis):\n    P = rot_axis(lig_P0, np.zeros(3), YAX, np.radians(delta))\n    out = list(zip(lig_syms, P))\n    for (M0,u0),ph in zip(ME, phis):\n        M = rot_axis(M0[None,:], np.zeros(3), YAX, np.radians(delta))[0]\n        u = rot_axis(u0[None,:], np.zeros(3), YAX, np.radians(delta))[0]\n        e1 = norm(np.cross(u, [0,0,1.0]) if abs(u[2])<0.9 else np.cross(u,[1,0,0]))\n        e2 = norm(np.cross(u, e1))\n        for k in range(3):\n            pkk = np.radians(ph + 120*k)\n            hd = (1.0/3.0)*u + 0.9428*(np.cos(pkk)*e1 + np.sin(pkk)*e2)\n            out.append(('H', M + 1.09*norm(hd)))\n    return out\n\n# ---------- PCy3 ----------\npcy = Chem.MolFromSmiles(\"C1CCCCC1P(C2CCCCC2)C3CCCCC3\")\npcy = Chem.AddHs(pcy); embed_opt(pcy, seed=7)\nppos = np.array([list(pcy.GetConformer().GetAtomPosition(i)) for i in range(pcy.GetNumAtoms())])\npsym = [a.GetSymbol() for a in pcy.GetAtoms()]\np_idx = next(a.GetIdx() for a in pcy.GetAtoms() if a.GetSymbol()=='P')\nipso = [x.GetIdx() for x in pcy.GetAtomWithIdx(p_idx).GetNeighbors()]\nRp = rotmat_from_to(norm(ppos[p_idx]-np.mean(ppos[ipso],axis=0)), [0,1,0.0])\nppos_r = (Rp @ ppos.T).T\nP_target = np.array([0.0, -2.40, 0.0])\nppos_r = ppos_r + (P_target - ppos_r[p_idx])\ndef pcy_atoms(tau):\n    return list(zip(psym, rot_axis(ppos_r, P_target, YAX, np.radians(tau))))\n\n# ---------- triflate ----------\notf = Chem.MolFromSmiles(\"O=S(=O)([O-])C(F)(F)F\"); embed_opt(otf, seed=11)\ntpos = np.array([list(otf.GetConformer().GetAtomPosition(i)) for i in range(otf.GetNumAtoms())])\ntsym = [a.GetSymbol() for a in otf.GetAtoms()]\ns_idx = next(a.GetIdx() for a in otf.GetAtoms() if a.GetSymbol()=='S')\nom_idx = next(a.GetIdx() for a in otf.GetAtoms() if a.GetSymbol()=='O' and a.GetFormalCharge()==-1)\n# equatorial positions bent away from 8-Me (+-70 deg, tilted slightly down)\ndef eq_pos(r, azim, drop):\n    v = np.array([r*np.cos(np.radians(azim)), drop, r*np.sin(np.radians(azim))])\n    return v * (r/np.linalg.norm(v))\no_t = eq_pos(2.15, 70.0, -0.20)\nd_or = norm(-o_t); t_ax = norm(np.cross(d_or, [0,1,0]))\nw_t = np.cos(np.radians(132))*d_or + np.sin(np.radians(132))*t_ax\nRt = rotmat_from_to(norm(tpos[s_idx]-tpos[om_idx]), w_t)\ntpos_r = (Rt @ (tpos - tpos[om_idx]).T).T + o_t\ndef otf_atoms(tau):\n    return list(zip(tsym, rot_axis(tpos_r, o_t, norm(o_t), np.radians(tau))))\n\nhyd = ('H', eq_pos(1.55, -70.0, -0.12))\nrh  = ('Rh', np.zeros(3))\n\ndef pair_pen(PA, RA, PB, RB):\n    D = np.linalg.norm(PA[:,None,:]-PB[None,:,:], axis=-1)\n    R0 = 0.75*(RA[:,None]+RB[None,:])\n    ratio = np.minimum(R0/np.maximum(D,0.4), 8.0)\n    return float((ratio**12).sum())\n\nFR_R = {s:VDW[s] for s in VDW}\ndef frag_arrays(fr):\n    return np.array([p for _,p in fr]), np.array([VDW[s] for s,_ in fr])\n\ndef total_pen(delta, tau_o, tau_p, phis):\n    la = lig_atoms(delta, phis); pa = pcy_atoms(tau_p); oa = otf_atoms(tau_o)\n    frags = [la, pa, oa]\n    tot = 0.0\n    for i in range(3):\n        for j in range(i+1,3):\n            PA,RA = frag_arrays(frags[i]); PB,RB = frag_arrays(frags[j])\n            tot += pair_pen(PA,RA,PB,RB)\n    for fr in frags:\n        PA,RA = frag_arrays(fr)\n        tot += pair_pen(PA,RA,hyd[1][None,:],np.array([VDW['H']]))\n    return tot\n\ndelta, tau_o, tau_p, phis = 0.0, 0.0, 0.0, [0.0,0.0,30.0,30.0]\nprint(\"initial penalty %.1f\" % total_pen(delta,tau_o,tau_p,phis))\nfor it in range(3):\n    delta = min([(d, total_pen(d,tau_o,tau_p,phis)) for d in range(-30,31,2)], key=lambda t:t[1])[0]\n    tau_o = min([(t, total_pen(delta,t,tau_p,phis)) for t in range(0,360,5)], key=lambda t:t[1])[0]\n    tau_p = min([(t, total_pen(delta,tau_o,t,phis)) for t in range(0,360,5)], key=lambda t:t[1])[0]\n    for mi in range(4):\n        best=None\n        for ph in range(0,120,5):\n            p2 = list(phis); p2[mi]=ph\n            sc = total_pen(delta,tau_o,tau_p,p2)\n            if best is None or sc<best[0]: best=(sc,p2)\n        phis = best[1]\n    print(f\"iter {it}: delta={delta} tau_o={tau_o} tau_p={tau_p} phis={phis} penalty %.2f\" % total_pen(delta,tau_o,tau_p,phis))\n\nall_atoms = [rh] + lig_atoms(delta, phis) + pcy_atoms(tau_p) + otf_atoms(tau_o) + [hyd]\nnL = 32\ndef frag(i):\n    if i==0: return 'Rh'\n    if i<=nL: return 'lig'\n    if i<=nL+52: return 'pcy3'\n    if i<=nL+60: return 'otf'\n    return 'hyd'\nbad=[]\nworst=9\nfor i in range(len(all_atoms)):\n    for j in range(i+1,len(all_atoms)):\n        if frag(i)==frag(j): continue\n        si,sj = all_atoms[i][0], all_atoms[j][0]\n        if si=='Rh' or sj=='Rh': continue\n        d = np.linalg.norm(all_atoms[i][1]-all_atoms[j][1])\n        if d < 0.75*(VDW[si]+VDW[sj]): bad.append((round(float(d),2),i,si,frag(i),j,sj,frag(j)))\nprint(\"residual contacts (<0.75*vdW):\", len(bad))\nfor b in sorted(bad)[:14]: print(\"  \",b)\nidx_N  = 1 + lig_syms.index('N')\nidx_Si = 1 + lig_syms.index('Si')\nidx_P  = 1 + nL + p_idx\nidx_Otf= 1 + nL + 52 + om_idx\nidx_H  = len(all_atoms)-1\nprint(\"Rh distances: N %.2f Si %.2f P %.2f Otf %.2f H %.2f\" % tuple(\n    np.linalg.norm(all_atoms[i][1]) for i in [idx_N, idx_Si, idx_P, idx_Otf, idx_H]))\nwith open('assembled.xyz','w') as f:\n    f.write(f\"{len(all_atoms)}\\nassembled\\n\")\n    for s,p in all_atoms:\n        f.write(f\"{s:2s} {p[0]:12.6f} {p[1]:12.6f} {p[2]:12.6f}\\n\")\nprint(\"indices N,Si,P,Otf,H:\", idx_N, idx_Si, idx_P, idx_Otf, idx_H)\nEOF\npython3 build6.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 96676,
+   "output_tokens": 7037,
+   "total_tokens": 103713
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "initial penalty 42565306.3\niter 0: delta=22 tau_o=95 tau_p=100 phis=[100, 75, 10, 110] penalty 211.13\niter 1: delta=22 tau_o=95 tau_p=100 phis=[100, 75, 10, 110] penalty 211.13\niter 2: delta=22 tau_o=95 tau_p=100 phis=[100, 75, 10, 110] penalty 211.13\nresidual contacts (<0.75*vdW): 17\n   (1.57, 1, 'N', 'lig', 91, 'F', 'otf')\n   (1.66, 24, 'H', 'lig', 93, 'H', 'hyd')\n   (1.71, 26, 'H', 'lig', 93, 'H', 'hyd')\n   (1.73, 6, 'C', 'lig', 91, 'F', 'otf')\n   (1.77, 11, 'O', 'lig', 90, 'F', 'otf')\n   (1.79, 84, 'H', 'pcy3', 93, 'H', 'hyd')\n   (1.8, 28, 'H', 'lig', 73, 'H', 'pcy3')\n   (1.91, 20, 'C', 'lig', 72, 'H', 'pcy3')\n   (1.95, 2, 'C', 'lig', 90, 'F', 'otf')\n   (1.97, 2, 'C', 'lig', 91, 'F', 'otf')\n   (1.98, 12, 'Si', 'lig', 72, 'H', 'pcy3')\n   (2.01, 61, 'H', 'pcy3', 88, 'O', 'otf')\n   (2.05, 18, 'C', 'lig', 93, 'H', 'hyd')\n   (2.12, 19, 'C', 'lig', 73, 'H', 'pcy3')\nRh distances: N 2.20 Si 2.38 P 2.40 Otf 2.15 H 1.55\nindices N,Si,P,Otf,H: 1 12 39 88 93\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:12"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > build7.py << 'EOF'\nimport numpy as np\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem\nfrom collections import Counter\n\ndef norm(v):\n    v = np.asarray(v, float); n = np.linalg.norm(v); return v/n if n>0 else v\ndef ang2(deg): return np.array([np.cos(np.radians(deg)), np.sin(np.radians(deg)), 0.0])\ndef rotmat_from_to(a, b):\n    a = norm(a); b = norm(b)\n    v = np.cross(a, b); c = np.dot(a, b)\n    if np.linalg.norm(v) < 1e-9:\n        if c > 0: return np.eye(3)\n        axis = norm(np.cross(a, [1,0,0]) if abs(a[0]) < 0.9 else np.cross(a, [0,1,0]))\n        return 2*np.outer(axis, axis) - np.eye(3)\n    vx = np.array([[0,-v[2],v[1]],[v[2],0,-v[0]],[-v[1],v[0],0]])\n    return np.eye(3) + vx + vx@vx*((1-c)/(np.linalg.norm(v)**2))\ndef rot_axis(P, p0, axis, angd):\n    axis = norm(axis); X = P - p0\n    return p0 + X*np.cos(angd) + np.cross(axis, X)*np.sin(angd) + axis[None,:]*((X@axis)[:,None])*(1-np.cos(angd))\ndef embed_opt(mol, seed=42):\n    ps = AllChem.ETKDGv3(); ps.randomSeed = seed\n    assert AllChem.EmbedMolecule(mol, ps) == 0\n    try: AllChem.MMFFOptimizeMolecule(mol)\n    except Exception:\n        try: AllChem.UFFOptimizeMolecule(mol)\n        except Exception: pass\n    return mol\nVDW = {'H':1.20,'C':1.70,'N':1.55,'O':1.52,'F':1.47,'P':1.80,'S':1.80,'Si':2.10,'Rh':1.60}\n\n# ---------- chelate ligand ----------\na_t = np.array([0.0, 2.20, 0.0])\nb_t = 2.38*np.array([-np.sin(np.radians(82.0)), np.cos(np.radians(82.0)), 0.0])\ndef O_pos(th1): return a_t + 1.33*ang2(th1) + 1.36*ang2(th1+61.0)\nlo, hi = 130.0, 165.0\nfor _ in range(60):\n    mid = 0.5*(lo+hi)\n    if np.linalg.norm(O_pos(mid)-b_t) > 1.66: lo = mid\n    else: hi = mid\nth1 = 0.5*(lo+hi)\nN1 = a_t; C2 = a_t + 1.33*ang2(th1); O = O_pos(th1); Si = b_t.copy()\nC3  = C2 + 1.33*ang2(th1-60);  C4  = C3 + 1.33*ang2(th1-120)\nC4a = C4 + 1.33*ang2(th1-180); C8a = C4a + 1.33*ang2(th1-240)\nd0 = th1-240\nC5 = C4a + 1.33*ang2(d0+120); C6 = C5 + 1.33*ang2(d0+60)\nC7 = C6 + 1.33*ang2(d0);      C8 = C7 + 1.33*ang2(d0-60)\ncen_py = np.mean([N1,C2,C3,C4,C4a,C8a], axis=0)\ncen_bz = np.mean([C4a,C5,C6,C7,C8,C8a], axis=0)\nlig_base = [('N',N1),('C',C2),('C',C3),('C',C4),('C',C4a),('C',C8a),\n            ('C',C5),('C',C6),('C',C7),('C',C8),('O',O),('Si',Si)]\nfor X, cen in [(C3,cen_py),(C5,cen_bz),(C6,cen_bz),(C7,cen_bz)]:\n    lig_base.append(('H', X + 1.08*norm(X-cen)))\nu_me4 = norm(C4-cen_py); Me4 = C4 + 1.50*u_me4\nu_me8 = norm(C8-cen_bz); Me8 = C8 + 1.50*u_me8\nu1 = norm(O-Si); u2 = norm(-Si)\nalpha = np.arccos(np.clip(np.dot(u1,u2),-1,1))\nmb = norm(u1+u2); q = norm(np.cross(u1,u2))\nxx = 1.0/(3.0*np.cos(alpha/2)); xx = min(xx,0.95); yy = np.sqrt(max(1-xx*xx,0.2))\nmethyls = [(Me4, u_me4), (Me8, u_me8)]\nfor uu in (-xx*mb+yy*q, -xx*mb-yy*q):\n    methyls.append((Si + 1.88*uu, uu))\nfor M,u in methyls: lig_base.append(('C', M))\nlig_syms = [s for s,_ in lig_base]\nlig_P0 = np.array([p for _,p in lig_base])\nME = [(np.array(M), np.array(u)) for M,u in methyls]\nYAX = np.array([0,1,0.0])\ndef lig_atoms(delta, phis):\n    P = rot_axis(lig_P0, np.zeros(3), YAX, np.radians(delta))\n    out = list(zip(lig_syms, P))\n    for (M0,u0),ph in zip(ME, phis):\n        M = rot_axis(M0[None,:], np.zeros(3), YAX, np.radians(delta))[0]\n        u = rot_axis(u0[None,:], np.zeros(3), YAX, np.radians(delta))[0]\n        e1 = norm(np.cross(u, [0,0,1.0]) if abs(u[2])<0.9 else np.cross(u,[1,0,0]))\n        e2 = norm(np.cross(u, e1))\n        for k in range(3):\n            pkk = np.radians(ph + 120*k)\n            hd = (1.0/3.0)*u + 0.9428*(np.cos(pkk)*e1 + np.sin(pkk)*e2)\n            out.append(('H', M + 1.09*norm(hd)))\n    return out\n\n# ---------- PCy3 ----------\npcy = Chem.MolFromSmiles(\"C1CCCCC1P(C2CCCCC2)C3CCCCC3\")\npcy = Chem.AddHs(pcy); embed_opt(pcy, seed=7)\nppos = np.array([list(pcy.GetConformer().GetAtomPosition(i)) for i in range(pcy.GetNumAtoms())])\npsym = [a.GetSymbol() for a in pcy.GetAtoms()]\np_idx = next(a.GetIdx() for a in pcy.GetAtoms() if a.GetSymbol()=='P')\nipso = [x.GetIdx() for x in pcy.GetAtomWithIdx(p_idx).GetNeighbors()]\nRp = rotmat_from_to(norm(ppos[p_idx]-np.mean(ppos[ipso],axis=0)), [0,1,0.0])\nppos_r = (Rp @ ppos.T).T\nP_target = np.array([0.0, -2.40, 0.0])\nppos_r = ppos_r + (P_target - ppos_r[p_idx])\ndef pcy_atoms(tau):\n    return list(zip(psym, rot_axis(ppos_r, P_target, YAX, np.radians(tau))))\n\n# ---------- triflate ----------\notf = Chem.MolFromSmiles(\"O=S(=O)([O-])C(F)(F)F\"); embed_opt(otf, seed=11)\ntpos = np.array([list(otf.GetConformer().GetAtomPosition(i)) for i in range(otf.GetNumAtoms())])\ntsym = [a.GetSymbol() for a in otf.GetAtoms()]\ns_idx = next(a.GetIdx() for a in otf.GetAtoms() if a.GetSymbol()=='S')\nom_idx = next(a.GetIdx() for a in otf.GetAtoms() if a.GetSymbol()=='O' and a.GetFormalCharge()==-1)\ndef eq_pos(r, azim, drop):\n    v = np.array([r*np.cos(np.radians(azim)), drop, r*np.sin(np.radians(azim))])\n    return v * (r/np.linalg.norm(v))\no_t = eq_pos(2.15, 70.0, -0.20)\nd_or = norm(-o_t)\nt_down = norm(np.array([0,-1,0.0]) - d_or*np.dot([0,-1,0.0], d_or))\nt_side = norm(np.cross(d_or, t_down))\ndef otf_place(beta, gamma):\n    \"\"\"beta: cone bend dir around d_or from t_down; gamma: rotation about S-O bond\"\"\"\n    w = np.cos(np.radians(132))*d_or + np.sin(np.radians(132))*(np.cos(np.radians(beta))*t_down + np.sin(np.radians(beta))*t_side)\n    Rt = rotmat_from_to(norm(tpos[s_idx]-tpos[om_idx]), w)\n    placed = (Rt @ (tpos - tpos[om_idx]).T).T + o_t\n    # rotate about S-O bond axis (through midpoint) by gamma\n    ax = norm(placed[s_idx]-placed[om_idx]); mid = 0.5*(placed[s_idx]+placed[om_idx])\n    placed = rot_axis(placed, mid, ax, np.radians(gamma))\n    return list(zip(tsym, placed))\n\nhyd = ('H', eq_pos(1.55, -70.0, -0.12))\nrh  = ('Rh', np.zeros(3))\ndef pair_pen(PA, RA, PB, RB):\n    D = np.linalg.norm(PA[:,None,:]-PB[None,:,:], axis=-1)\n    R0 = 0.75*(RA[:,None]+RB[None,:])\n    ratio = np.minimum(R0/np.maximum(D,0.4), 8.0)\n    return float((ratio**12).sum())\ndef frag_arrays(fr):\n    return np.array([p for _,p in fr]), np.array([VDW[s] for s,_ in fr])\n\ndef total_pen(delta, obeta, ogamma, tau_p, phis):\n    frags = [lig_atoms(delta, phis), pcy_atoms(tau_p), otf_place(obeta, ogamma)]\n    tot = 0.0\n    for i in range(3):\n        for j in range(i+1,3):\n            PA,RA = frag_arrays(frags[i]); PB,RB = frag_arrays(frags[j])\n            tot += pair_pen(PA,RA,PB,RB)\n    for fr in frags:\n        PA,RA = frag_arrays(fr)\n        tot += pair_pen(PA,RA,hyd[1][None,:],np.array([VDW['H']]))\n    return tot\n\ndelta, obeta, ogamma, tau_p, phis = 0.0, 0.0, 0.0, 0.0, [0.0,0.0,30.0,30.0]\nprint(\"initial penalty %.1f\" % total_pen(delta,obeta,ogamma,tau_p,phis))\nfor it in range(3):\n    delta = min([(d, total_pen(d,obeta,ogamma,tau_p,phis)) for d in range(-30,31,2)], key=lambda t:t[1])[0]\n    obeta = min([(b, total_pen(delta,b,ogamma,tau_p,phis)) for b in range(-80,81,5)], key=lambda t:t[1])[0]\n    ogamma = min([(g, total_pen(delta,obeta,g,tau_p,phis)) for g in range(0,360,10)], key=lambda t:t[1])[0]\n    tau_p = min([(t, total_pen(delta,obeta,ogamma,t,phis)) for t in range(0,360,5)], key=lambda t:t[1])[0]\n    for mi in range(4):\n        best=None\n        for ph in range(0,120,5):\n            p2 = list(phis); p2[mi]=ph\n            sc = total_pen(delta,obeta,ogamma,tau_p,p2)\n            if best is None or sc<best[0]: best=(sc,p2)\n        phis = best[1]\n    print(f\"iter {it}: delta={delta} obeta={obeta} ogamma={ogamma} tau_p={tau_p} phis={phis} pen %.2f\" % total_pen(delta,obeta,ogamma,tau_p,phis))\n\nall_atoms = [rh] + lig_atoms(delta, phis) + pcy_atoms(tau_p) + otf_place(obeta, ogamma) + [hyd]\nnL = 32\ndef frag(i):\n    if i==0: return 'Rh'\n    if i<=nL: return 'lig'\n    if i<=nL+52: return 'pcy3'\n    if i<=nL+60: return 'otf'\n    return 'hyd'\nbad=[]\nfor i in range(len(all_atoms)):\n    for j in range(i+1,len(all_atoms)):\n        if frag(i)==frag(j): continue\n        si,sj = all_atoms[i][0], all_atoms[j][0]\n        if si=='Rh' or sj=='Rh': continue\n        d = np.linalg.norm(all_atoms[i][1]-all_atoms[j][1])\n        if d < 0.75*(VDW[si]+VDW[sj]): bad.append((round(float(d),2),i,si,frag(i),j,sj,frag(j)))\nprint(\"residual contacts (<0.75*vdW):\", len(bad))\nfor b in sorted(bad)[:14]: print(\"  \",b)\nidx_N  = 1 + lig_syms.index('N')\nidx_Si = 1 + lig_syms.index('Si')\nidx_P  = 1 + nL + p_idx\nidx_Otf= 1 + nL + 52 + om_idx\nidx_H  = len(all_atoms)-1\nprint(\"Rh distances: N %.2f Si %.2f P %.2f Otf %.2f H %.2f\" % tuple(\n    np.linalg.norm(all_atoms[i][1]) for i in [idx_N, idx_Si, idx_P, idx_Otf, idx_H]))\nwith open('assembled.xyz','w') as f:\n    f.write(f\"{len(all_atoms)}\\nassembled\\n\")\n    for s,p in all_atoms:\n        f.write(f\"{s:2s} {p[0]:12.6f} {p[1]:12.6f} {p[2]:12.6f}\\n\")\nprint(\"indices N,Si,P,Otf,H:\", idx_N, idx_Si, idx_P, idx_Otf, idx_H)\nEOF\npython3 build7.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 104275,
+   "output_tokens": 8409,
+   "total_tokens": 112684
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "initial penalty 248205070.0\niter 0: delta=-16 obeta=80 ogamma=80 tau_p=105 phis=[90, 20, 115, 20] pen 116.53\niter 1: delta=-20 obeta=80 ogamma=80 tau_p=110 phis=[90, 25, 0, 20] pen 96.34\niter 2: delta=-18 obeta=80 ogamma=70 tau_p=110 phis=[95, 20, 115, 20] pen 95.78\nresidual contacts (<0.75*vdW): 12\n   (1.33, 31, 'H', 'lig', 73, 'H', 'pcy3')\n   (1.4, 32, 'H', 'lig', 72, 'H', 'pcy3')\n   (1.59, 29, 'H', 'lig', 84, 'H', 'pcy3')\n   (1.66, 28, 'H', 'lig', 84, 'H', 'pcy3')\n   (1.84, 24, 'H', 'lig', 88, 'O', 'otf')\n   (1.87, 19, 'C', 'lig', 84, 'H', 'pcy3')\n   (1.92, 31, 'H', 'lig', 45, 'C', 'pcy3')\n   (1.93, 26, 'H', 'lig', 88, 'O', 'otf')\n   (1.96, 20, 'C', 'lig', 72, 'H', 'pcy3')\n   (2.14, 20, 'C', 'lig', 73, 'H', 'pcy3')\n   (2.28, 18, 'C', 'lig', 88, 'O', 'otf')\n   (2.51, 20, 'C', 'lig', 45, 'C', 'pcy3')\nRh distances: N 2.20 Si 2.38 P 2.40 Otf 2.15 H 1.55\nindices N,Si,P,Otf,H: 1 12 39 88 93\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:13"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > build8.py << 'EOF'\nimport numpy as np\nfrom rdkit import Chem\nfrom rdkit.Chem import AllChem\nfrom collections import Counter\n\ndef norm(v):\n    v = np.asarray(v, float); n = np.linalg.norm(v); return v/n if n>0 else v\ndef ang2(deg): return np.array([np.cos(np.radians(deg)), np.sin(np.radians(deg)), 0.0])\ndef rotmat_from_to(a, b):\n    a = norm(a); b = norm(b)\n    v = np.cross(a, b); c = np.dot(a, b)\n    if np.linalg.norm(v) < 1e-9:\n        if c > 0: return np.eye(3)\n        axis = norm(np.cross(a, [1,0,0]) if abs(a[0]) < 0.9 else np.cross(a, [0,1,0]))\n        return 2*np.outer(axis, axis) - np.eye(3)\n    vx = np.array([[0,-v[2],v[1]],[v[2],0,-v[0]],[-v[1],v[0],0]])\n    return np.eye(3) + vx + vx@vx*((1-c)/(np.linalg.norm(v)**2))\ndef rot_axis(P, p0, axis, angd):\n    axis = norm(axis); X = P - p0\n    return p0 + X*np.cos(angd) + np.cross(axis, X)*np.sin(angd) + axis[None,:]*((X@axis)[:,None])*(1-np.cos(angd))\ndef embed_opt(mol, seed=42):\n    ps = AllChem.ETKDGv3(); ps.randomSeed = seed\n    assert AllChem.EmbedMolecule(mol, ps) == 0\n    try: AllChem.MMFFOptimizeMolecule(mol)\n    except Exception:\n        try: AllChem.UFFOptimizeMolecule(mol)\n        except Exception: pass\n    return mol\nVDW = {'H':1.20,'C':1.70,'N':1.55,'O':1.52,'F':1.47,'P':1.80,'S':1.80,'Si':2.10,'Rh':1.60}\n\na_t = np.array([0.0, 2.20, 0.0])\nb_t = 2.38*np.array([-np.sin(np.radians(82.0)), np.cos(np.radians(82.0)), 0.0])\ndef O_pos(th1): return a_t + 1.33*ang2(th1) + 1.36*ang2(th1+61.0)\nlo, hi = 130.0, 165.0\nfor _ in range(60):\n    mid = 0.5*(lo+hi)\n    if np.linalg.norm(O_pos(mid)-b_t) > 1.66: lo = mid\n    else: hi = mid\nth1 = 0.5*(lo+hi)\nN1 = a_t; C2 = a_t + 1.33*ang2(th1); O = O_pos(th1); Si = b_t.copy()\nC3  = C2 + 1.33*ang2(th1-60);  C4  = C3 + 1.33*ang2(th1-120)\nC4a = C4 + 1.33*ang2(th1-180); C8a = C4a + 1.33*ang2(th1-240)\nd0 = th1-240\nC5 = C4a + 1.33*ang2(d0+120); C6 = C5 + 1.33*ang2(d0+60)\nC7 = C6 + 1.33*ang2(d0);      C8 = C7 + 1.33*ang2(d0-60)\ncen_py = np.mean([N1,C2,C3,C4,C4a,C8a], axis=0)\ncen_bz = np.mean([C4a,C5,C6,C7,C8,C8a], axis=0)\nlig_base = [('N',N1),('C',C2),('C',C3),('C',C4),('C',C4a),('C',C8a),\n            ('C',C5),('C',C6),('C',C7),('C',C8),('O',O),('Si',Si)]\nfor X, cen in [(C3,cen_py),(C5,cen_bz),(C6,cen_bz),(C7,cen_bz)]:\n    lig_base.append(('H', X + 1.08*norm(X-cen)))\nu_me4 = norm(C4-cen_py); Me4 = C4 + 1.50*u_me4\nu_me8 = norm(C8-cen_bz); Me8 = C8 + 1.50*u_me8\nu1 = norm(O-Si); u2 = norm(-Si)\nalpha = np.arccos(np.clip(np.dot(u1,u2),-1,1))\nmb = norm(u1+u2); q = norm(np.cross(u1,u2)); pv = norm(np.cross(mb, q))\nxx = 1.0/(3.0*np.cos(alpha/2)); xx = min(xx,0.95); yy = np.sqrt(max(1-xx*xx,0.2))\nlig_syms = [s for s,_ in lig_base] + ['C','C','C','C']\nlig_P0 = np.array([p for _,p in lig_base])\nYAX = np.array([0,1,0.0])\n\ndef sime_dirs(psi):\n    w = np.cos(np.radians(psi))*q + np.sin(np.radians(psi))*pv\n    return -xx*mb + yy*w, -xx*mb - yy*w\n\ndef lig_atoms(delta, phis, psi):\n    u3, u4 = sime_dirs(psi)\n    Mlist = [(Me4, u_me4), (Me8, u_me8), (Si + 1.88*u3, u3), (Si + 1.88*u4, u4)]\n    Pbase = np.vstack([lig_P0, np.array([M for M,_ in Mlist])])\n    P = rot_axis(Pbase, np.zeros(3), YAX, np.radians(delta))\n    out = list(zip(lig_syms, P))\n    for (M0,u0),ph in zip(Mlist, phis):\n        M = rot_axis(M0[None,:], np.zeros(3), YAX, np.radians(delta))[0]\n        u = rot_axis(u0[None,:], np.zeros(3), YAX, np.radians(delta))[0]\n        e1 = norm(np.cross(u, [0,0,1.0]) if abs(u[2])<0.9 else np.cross(u,[1,0,0]))\n        e2 = norm(np.cross(u, e1))\n        for k in range(3):\n            pkk = np.radians(ph + 120*k)\n            hd = (1.0/3.0)*u + 0.9428*(np.cos(pkk)*e1 + np.sin(pkk)*e2)\n            out.append(('H', M + 1.09*norm(hd)))\n    return out\n\npcy = Chem.MolFromSmiles(\"C1CCCCC1P(C2CCCCC2)C3CCCCC3\")\npcy = Chem.AddHs(pcy); embed_opt(pcy, seed=7)\nppos = np.array([list(pcy.GetConformer().GetAtomPosition(i)) for i in range(pcy.GetNumAtoms())])\npsym = [a.GetSymbol() for a in pcy.GetAtoms()]\np_idx = next(a.GetIdx() for a in pcy.GetAtoms() if a.GetSymbol()=='P')\nipso = [x.GetIdx() for x in pcy.GetAtomWithIdx(p_idx).GetNeighbors()]\nRp = rotmat_from_to(norm(ppos[p_idx]-np.mean(ppos[ipso],axis=0)), [0,1,0.0])\nppos_r = (Rp @ ppos.T).T\nP_target = np.array([0.0, -2.40, 0.0])\nppos_r = ppos_r + (P_target - ppos_r[p_idx])\ndef pcy_atoms(tau):\n    return list(zip(psym, rot_axis(ppos_r, P_target, YAX, np.radians(tau))))\n\notf = Chem.MolFromSmiles(\"O=S(=O)([O-])C(F)(F)F\"); embed_opt(otf, seed=11)\ntpos = np.array([list(otf.GetConformer().GetAtomPosition(i)) for i in range(otf.GetNumAtoms())])\ntsym = [a.GetSymbol() for a in otf.GetAtoms()]\ns_idx = next(a.GetIdx() for a in otf.GetAtoms() if a.GetSymbol()=='S')\nom_idx = next(a.GetIdx() for a in otf.GetAtoms() if a.GetSymbol()=='O' and a.GetFormalCharge()==-1)\ndef eq_pos(r, azim, drop):\n    v = np.array([r*np.cos(np.radians(azim)), drop, r*np.sin(np.radians(azim))])\n    return v * (r/np.linalg.norm(v))\no_t = eq_pos(2.15, 70.0, -0.20)\nd_or = norm(-o_t)\nt_down = norm(np.array([0,-1,0.0]) - d_or*np.dot([0,-1,0.0], d_or))\nt_side = norm(np.cross(d_or, t_down))\ndef otf_place(beta, gamma):\n    w = np.cos(np.radians(132))*d_or + np.sin(np.radians(132))*(np.cos(np.radians(beta))*t_down + np.sin(np.radians(beta))*t_side)\n    Rt = rotmat_from_to(norm(tpos[s_idx]-tpos[om_idx]), w)\n    placed = (Rt @ (tpos - tpos[om_idx]).T).T + o_t\n    ax = norm(placed[s_idx]-placed[om_idx]); mid = 0.5*(placed[s_idx]+placed[om_idx])\n    placed = rot_axis(placed, mid, ax, np.radians(gamma))\n    return list(zip(tsym, placed))\n\nhyd = ('H', eq_pos(1.55, -70.0, -0.12))\nrh  = ('Rh', np.zeros(3))\ndef pair_pen(PA, RA, PB, RB):\n    D = np.linalg.norm(PA[:,None,:]-PB[None,:,:], axis=-1)\n    R0 = 0.75*(RA[:,None]+RB[None,:])\n    ratio = np.minimum(R0/np.maximum(D,0.4), 8.0)\n    return float((ratio**12).sum())\ndef frag_arrays(fr):\n    return np.array([p for _,p in fr]), np.array([VDW[s] for s,_ in fr])\ndef total_pen(st):\n    delta, obeta, ogamma, tau_p, psi, phis = st\n    frags = [lig_atoms(delta, phis, psi), pcy_atoms(tau_p), otf_place(obeta, ogamma)]\n    tot = 0.0\n    for i in range(3):\n        for j in range(i+1,3):\n            PA,RA = frag_arrays(frags[i]); PB,RB = frag_arrays(frags[j])\n            tot += pair_pen(PA,RA,PB,RB)\n    for fr in frags:\n        PA,RA = frag_arrays(fr)\n        tot += pair_pen(PA,RA,hyd[1][None,:],np.array([VDW['H']]))\n    return tot\n\nst = [0.0, 0.0, 0.0, 0.0, 0.0, [0.0,0.0,30.0,30.0]]\nprint(\"initial penalty %.1f\" % total_pen(st))\ngrids = [\n    (0, list(range(-30,31,2))),\n    (1, list(range(-120,121,5))),\n    (2, list(range(0,360,10))),\n    (3, list(range(0,360,5))),\n    (4, list(range(0,360,10))),\n]\nfor it in range(4):\n    for gi, grid in grids:\n        best=None\n        for val in grid:\n            s2 = list(st); s2[gi]=val\n            sc = total_pen(s2)\n            if best is None or sc<best[0]: best=(sc,s2)\n        st = best[1]\n    for mi in range(4):\n        best=None\n        for ph in range(0,120,5):\n            p2 = list(st[5]); p2[mi]=ph\n            s2 = list(st); s2[5]=p2\n            sc = total_pen(s2)\n            if best is None or sc<best[0]: best=(sc,s2)\n        st = best[1]\n    print(f\"iter {it}: delta={st[0]} obeta={st[1]} ogamma={st[2]} tau_p={st[3]} psi={st[4]} phis={st[5]} pen %.2f\" % total_pen(st))\n\ndelta, obeta, ogamma, tau_p, psi, phis = st\nall_atoms = [rh] + lig_atoms(delta, phis, psi) + pcy_atoms(tau_p) + otf_place(obeta, ogamma) + [hyd]\nnL = 32\ndef frag(i):\n    if i==0: return 'Rh'\n    if i<=nL: return 'lig'\n    if i<=nL+52: return 'pcy3'\n    if i<=nL+60: return 'otf'\n    return 'hyd'\nbad=[]\nfor i in range(len(all_atoms)):\n    for j in range(i+1,len(all_atoms)):\n        if frag(i)==frag(j): continue\n        si,sj = all_atoms[i][0], all_atoms[j][0]\n        if si=='Rh' or sj=='Rh': continue\n        d = np.linalg.norm(all_atoms[i][1]-all_atoms[j][1])\n        if d < 0.75*(VDW[si]+VDW[sj]): bad.append((round(float(d),2),i,si,frag(i),j,sj,frag(j)))\nprint(\"residual contacts (<0.75*vdW):\", len(bad))\nfor b in sorted(bad)[:14]: print(\"  \",b)\nidx_N  = 1 + lig_syms.index('N')\nidx_Si = 1 + lig_syms.index('Si')\nidx_P  = 1 + nL + p_idx\nidx_Otf= 1 + nL + 52 + om_idx\nidx_H  = len(all_atoms)-1\nprint(\"Rh distances: N %.2f Si %.2f P %.2f Otf %.2f H %.2f\" % tuple(\n    np.linalg.norm(all_atoms[i][1]) for i in [idx_N, idx_Si, idx_P, idx_Otf, idx_H]))\nwith open('assembled.xyz','w') as f:\n    f.write(f\"{len(all_atoms)}\\nassembled\\n\")\n    for s,p in all_atoms:\n        f.write(f\"{s:2s} {p[0]:12.6f} {p[1]:12.6f} {p[2]:12.6f}\\n\")\nprint(\"indices N,Si,P,Otf,H:\", idx_N, idx_Si, idx_P, idx_Otf, idx_H)\nEOF\npython3 build8.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 113213,
+   "output_tokens": 6263,
+   "total_tokens": 119476
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "initial penalty 248205070.0\niter 0: delta=-16 obeta=90 ogamma=100 tau_p=55 psi=10 phis=[90, 20, 55, 90] pen 159.68\niter 1: delta=-12 obeta=120 ogamma=140 tau_p=55 psi=20 phis=[110, 15, 60, 80] pen 37.90\niter 2: delta=-10 obeta=120 ogamma=140 tau_p=55 psi=20 phis=[110, 15, 60, 80] pen 34.78\niter 3: delta=-10 obeta=120 ogamma=140 tau_p=55 psi=20 phis=[110, 15, 60, 80] pen 34.78\nresidual contacts (<0.75*vdW): 6\n   (1.64, 84, 'H', 'pcy3', 93, 'H', 'hyd')\n   (2.01, 53, 'H', 'pcy3', 88, 'O', 'otf')\n   (2.02, 12, 'Si', 'lig', 72, 'H', 'pcy3')\n   (2.02, 19, 'C', 'lig', 72, 'H', 'pcy3')\n   (2.02, 61, 'H', 'pcy3', 85, 'O', 'otf')\n   (2.13, 61, 'H', 'pcy3', 86, 'S', 'otf')\nRh distances: N 2.20 Si 2.38 P 2.40 Otf 2.15 H 1.55\nindices N,Si,P,Otf,H: 1 12 39 88 93\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:14"
+ },
+ {
+  "type": "AIMessage",
+  "content": "The clashes are now minimal (worst is 1.64 \u00c5 H\u2013H, easily relaxable). Let me visually inspect the assembled structure:",
+  "tool_calls": [
+   {
+    "name": "view_molecule",
+    "args": {
+     "xyz_file_relative_path": "assembled.xyz",
+     "left_right_deg": 0,
+     "up_down_deg": 0,
+     "reset_view": true
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 119906,
+   "output_tokens": 458,
+   "total_tokens": 120364
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[image]",
+  "name": "view_molecule",
+  "tool_call_id": "view_molecule:15"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "constraint_xtb",
+    "args": {
+     "input_xyz": "assembled.xyz",
+     "output_xyz": "opt1.xyz",
+     "charge": 0,
+     "uhf": 0,
+     "gfn_method": "gfn2",
+     "ncores": 4,
+     "force_constant": 0.5,
+     "distance_constraints": [
+      {
+       "atoms": [
+        0,
+        1
+       ],
+       "value": 2.2
+      },
+      {
+       "atoms": [
+        0,
+        12
+       ],
+       "value": 2.38
+      },
+      {
+       "atoms": [
+        0,
+        39
+       ],
+       "value": 2.4
+      },
+      {
+       "atoms": [
+        0,
+        88
+       ],
+       "value": 2.15
+      },
+      {
+       "atoms": [
+        0,
+        93
+       ],
+       "value": 1.55
+      }
+     ]
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 121740,
+   "output_tokens": 1367,
+   "total_tokens": 123107
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "{\"return_code\": 0, \"output_xyz\": \"/h/400/skaxu/elagenteworkdir/mol_0058_004abd60_kimi-k3/opt1.xyz\", \"log_path\": \"/h/400/skaxu/elagenteworkdir/mol_0058_004abd60_kimi-k3/opt1.log\", \"error_msg\": null}",
+  "name": "constraint_xtb",
+  "tool_call_id": "constraint_xtb:16"
+ },
+ {
+  "type": "AIMessage",
+  "content": "The optimization completed. Let me check the coordination geometry in the optimized structure:",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > check.py << 'EOF'\nimport numpy as np\ndef loadxyz(fn):\n    with open(fn) as f:\n        ls = f.read().splitlines()\n    n = int(ls[0]); atoms=[]\n    for ln in ls[2:2+n]:\n        p = ln.split()\n        atoms.append((p[0], np.array([float(p[1]),float(p[2]),float(p[3])])))\n    return atoms\nA = loadxyz('opt1.xyz')\ndef d(i,j): return np.linalg.norm(A[i][1]-A[j][1])\ndef ang(i,j,k):\n    v1 = norm(A[i][1]-A[j][1]); v2 = norm(A[k][1]-A[j][1])\n    return np.degrees(np.arccos(np.clip(np.dot(v1,v2),-1,1)))\ndef norm(v): return v/np.linalg.norm(v)\nprint(\"=== Rh coordination ===\")\nprint(\"Rh-N   %.3f\" % d(0,1))\nprint(\"Rh-Si  %.3f\" % d(0,12))\nprint(\"Rh-P   %.3f\" % d(0,39))\nprint(\"Rh-Otf %.3f\" % d(0,88))\nprint(\"Rh-H   %.3f\" % d(0,93))\nprint(\"angles at Rh:\")\nprint(\"N-Rh-Si   %.1f\" % ang(1,0,12))\nprint(\"N-Rh-P    %.1f\" % ang(1,0,39))\nprint(\"N-Rh-Otf  %.1f\" % ang(1,0,88))\nprint(\"N-Rh-H    %.1f\" % ang(1,0,93))\nprint(\"Si-Rh-P   %.1f\" % ang(12,0,39))\nprint(\"Si-Rh-Otf %.1f\" % ang(12,0,88))\nprint(\"Si-Rh-H   %.1f\" % ang(12,0,93))\nprint(\"H-Rh-Otf  %.1f\" % ang(93,0,88))\nprint(\"H-Rh-P    %.1f\" % ang(93,0,39))\nprint(\"Otf-Rh-P  %.1f\" % ang(88,0,39))\nprint(\"=== ligand internals ===\")\nprint(\"Si-O   %.3f\" % d(12,11))\nprint(\"O-C2   %.3f\" % d(11,2))\nprint(\"N=C2   %.3f\" % d(1,2))\nprint(\"C2-O-Si %.1f\" % ang(2,11,12))\nprint(\"N-C2-O %.1f\" % ang(1,2,11))\nprint(\"Rh-O-S %.1f\" % ang(0,88,86))\nprint(\"S-O(Rh) %.3f  S=O %.3f %.3f  S-C %.3f\" % (d(88,86), d(85,86), d(87,86), d(86,89)))\nprint(\"Si-C(Me) %.3f %.3f\" % (d(12,18), d(12,19)))\n# verify quinoline ring intact\nprint(\"C4-Me %.3f  C8-Me %.3f\" % (d(4,16), d(10,17)))\nEOF\npython3 check.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 123239,
+   "output_tokens": 818,
+   "total_tokens": 124057
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "=== Rh coordination ===\nRh-N   2.195\nRh-Si  2.374\nRh-P   2.392\nRh-Otf 2.152\nRh-H   1.544\nangles at Rh:\nN-Rh-Si   81.6\nN-Rh-P    175.4\nN-Rh-Otf  81.7\nN-Rh-H    94.1\nSi-Rh-P   100.4\nSi-Rh-Otf 91.3\nSi-Rh-H   91.1\nH-Rh-Otf  174.8\nH-Rh-P    90.1\nOtf-Rh-P  94.0\n=== ligand internals ===\nSi-O   1.685\nO-C2   1.305\nN=C2   1.320\nC2-O-Si 125.2\nN-C2-O 121.1\nRh-O-S 135.8\nS-O(Rh) 1.460  S=O 1.433 1.433  S-C 1.877\nSi-C(Me) 5.032 1.929\nC4-Me 5.279  C8-Me 4.983\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:17"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > check2.py << 'EOF'\nimport numpy as np\ndef loadxyz(fn):\n    with open(fn) as f:\n        ls = f.read().splitlines()\n    n = int(ls[0]); atoms=[]\n    for ln in ls[2:2+n]:\n        p = ln.split()\n        atoms.append((p[0], np.array([float(p[1]),float(p[2]),float(p[3])])))\n    return atoms\ndef norm(v): return v/np.linalg.norm(v)\nA0 = loadxyz('assembled.xyz')\nA1 = loadxyz('opt1.xyz')\ndef d(A,i,j): return np.linalg.norm(A[i][1]-A[j][1])\nprint(\"methyl bonds (opt):\")\nprint(\"C4-Me4  %.3f\" % d(A1,4,17))\nprint(\"C8-Me8  %.3f\" % d(A1,10,18))\nprint(\"Si-Me1  %.3f\" % d(A1,12,19))\nprint(\"Si-Me2  %.3f\" % d(A1,12,20))\n# configuration check: sign of triple products relative to chelate frame\ndef chirality_sign(A):\n    n = A[1][1]-A[0][1]; si = A[12][1]-A[0][1]\n    h = A[93][1]-A[0][1]; o = A[88][1]-A[0][1]\n    frame = np.cross(norm(n), norm(si))\n    return np.sign(np.dot(frame, norm(h))), np.sign(np.dot(frame, norm(o)))\nprint(\"assembled (sign H, sign OTf):\", chirality_sign(A0))\nprint(\"optimized (sign H, sign OTf):\", chirality_sign(A1))\n# dihedral N-Rh-Si... actually check improper torsion: view along N->P axis: order of equatorial Si,H,Otf\ndef eq_order(A):\n    axis = norm(A[39][1]-A[1][1])  # N->P\n    c = (A[1][1]+A[39][1])/2\n    def proj(i):\n        v = A[i][1]-c; return v - axis*np.dot(v,axis)\n    vs = {k: norm(proj(i)) for k,i in [('Si',12),('H',93),('O',88)]}\n    # signed angle Si->H->O about axis\n    def sang(a,b):\n        x = np.cross(vs[a],vs[b]); return np.degrees(np.arctan2(np.dot(x,axis), np.dot(vs[a],vs[b])))\n    return sang('Si','H'), sang('H','O'), sang('Si','O')\nprint(\"assembled eq angles Si->H, H->O, Si->O:\", [\"%.1f\"%x for x in eq_order(A0)])\nprint(\"optimized eq angles Si->H, H->O, Si->O:\", [\"%.1f\"%x for x in eq_order(A1)])\nEOF\npython3 check2.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 124361,
+   "output_tokens": 2280,
+   "total_tokens": 126641
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "methyl bonds (opt):\nC4-Me4  1.495\nC8-Me8  1.497\nSi-Me1  1.929\nSi-Me2  1.921\nassembled (sign H, sign OTf): (np.float64(-1.0), np.float64(1.0))\noptimized (sign H, sign OTf): (np.float64(-1.0), np.float64(1.0))\nassembled eq angles Si->H, H->O, Si->O: ['100.0', '140.0', '-120.0']\noptimized eq angles Si->H, H->O, Si->O: ['87.3', '179.3', '-93.4']\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:18"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "view_molecule",
+    "args": {
+     "xyz_file_relative_path": "opt1.xyz",
+     "left_right_deg": 0,
+     "up_down_deg": 0,
+     "reset_view": true
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 126831,
+   "output_tokens": 809,
+   "total_tokens": 127640
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[image]",
+  "name": "view_molecule",
+  "tool_call_id": "view_molecule:19"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > check3.py << 'EOF'\nimport numpy as np\ndef loadxyz(fn):\n    with open(fn) as f:\n        ls = f.read().splitlines()\n    n = int(ls[0]); atoms=[]\n    for ln in ls[2:2+n]:\n        p = ln.split()\n        atoms.append((p[0], np.array([float(p[1]),float(p[2]),float(p[3])])))\n    return atoms\nA = loadxyz('opt1.xyz')\ndef d(i,j): return np.linalg.norm(A[i][1]-A[j][1])\n# quinoline ring bond lengths (atoms 1-10: N1,C2,C3,C4,C4a,C8a,C5,C6,C7,C8)\npairs = [(1,2),(2,3),(3,4),(4,5),(5,6),(6,1),(5,7),(7,8),(8,9),(9,10),(10,6)]\nprint(\"quinoline ring bonds:\", \" \".join(\"%.2f\"%d(i,j) for i,j in pairs))\n# planarity of quinoline heavy atoms (1..11 minus O=11)\nimport numpy.linalg as la\nP = np.array([A[i][1] for i in range(1,11)])\nc = P.mean(axis=0); Pc = P-c\nu,s,vt = la.svd(Pc)\nprint(\"quinoline rms deviation from plane: %.3f\" % np.sqrt((Pc@vt[2])**2 .mean()))\n# close contacts (non-bonded heavy atoms < 2.0, any H < 1.5)\nVDW = {'H':1.20,'C':1.70,'N':1.55,'O':1.52,'F':1.47,'P':1.80,'S':1.80,'Si':2.10,'Rh':1.60}\nbad=[]\nfor i in range(len(A)):\n    for j in range(i+1,len(A)):\n        dd = d(i,j)\n        si,sj = A[i][0],A[j][0]\n        if dd < 0.62*(VDW[si]+VDW[sj]):\n            bad.append((round(dd,2),i,si,j,sj))\nprint(\"very close pairs (<0.62*vdW):\", len(bad))\nfor b in sorted(bad)[:20]: print(\"  \",b)\nEOF\npython3 check3.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 129016,
+   "output_tokens": 1591,
+   "total_tokens": 130607
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "quinoline ring bonds: 1.32 1.41 1.36 1.43 1.42 1.37 1.41 1.37 1.39 1.38 1.42\nTraceback (most recent call last):\n  File \"/h/400/skaxu/elagenteworkdir/mol_0058_004abd60_kimi-k3/check3.py\", line 20, in <module>\n    print(\"quinoline rms deviation from plane: %.3f\" % np.sqrt((Pc@vt[2])**2 .mean()))\n                                                                           ^^^^^^^\nAttributeError: 'int' object has no attribute 'mean'\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:20"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "cat > check3b.py << 'EOF'\nimport numpy as np\nimport numpy.linalg as la\ndef loadxyz(fn):\n    with open(fn) as f:\n        ls = f.read().splitlines()\n    n = int(ls[0]); atoms=[]\n    for ln in ls[2:2+n]:\n        p = ln.split()\n        atoms.append((p[0], np.array([float(p[1]),float(p[2]),float(p[3])])))\n    return atoms\nA = loadxyz('opt1.xyz')\ndef d(i,j): return np.linalg.norm(A[i][1]-A[j][1])\nP = np.array([A[i][1] for i in range(1,11)])\nc = P.mean(axis=0); Pc = P-c\nu,s,vt = la.svd(Pc)\ndev = Pc @ vt[2]\nprint(\"quinoline rms deviation from plane: %.3f\" % np.sqrt((dev**2).mean()))\nVDW = {'H':1.20,'C':1.70,'N':1.55,'O':1.52,'F':1.47,'P':1.80,'S':1.80,'Si':2.10,'Rh':1.60}\nbad=[]\nfor i in range(len(A)):\n    for j in range(i+1,len(A)):\n        dd = d(i,j)\n        si,sj = A[i][0],A[j][0]\n        if dd < 0.62*(VDW[si]+VDW[sj]):\n            bad.append((round(dd,2),i,si,j,sj))\nprint(\"very close pairs (<0.62*vdW):\", len(bad))\nfor b in sorted(bad)[:20]: print(\"  \",b)\n# H-H contacts specifically below 1.8\nhh=[]\nfor i in range(len(A)):\n    for j in range(i+1,len(A)):\n        if A[i][0]=='H' and A[j][0]=='H':\n            dd=d(i,j)\n            if dd<1.8: hh.append((round(dd,2),i,j))\nprint(\"H-H < 1.8:\", len(hh), sorted(hh)[:8])\nEOF\npython3 check3b.py"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 130781,
+   "output_tokens": 568,
+   "total_tokens": 131349
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "quinoline rms deviation from plane: 0.027\nvery close pairs (<0.62*vdW): 95\n   (np.float64(1.08), 3, 'C', 13, 'H')\n   (np.float64(1.08), 7, 'C', 14, 'H')\n   (np.float64(1.08), 8, 'C', 15, 'H')\n   (np.float64(1.08), 9, 'C', 16, 'H')\n   (np.float64(1.08), 19, 'C', 27, 'H')\n   (np.float64(1.08), 19, 'C', 29, 'H')\n   (np.float64(1.08), 20, 'C', 30, 'H')\n   (np.float64(1.08), 20, 'C', 31, 'H')\n   (np.float64(1.09), 17, 'C', 21, 'H')\n   (np.float64(1.09), 17, 'C', 22, 'H')\n   (np.float64(1.09), 17, 'C', 23, 'H')\n   (np.float64(1.09), 18, 'C', 25, 'H')\n   (np.float64(1.09), 18, 'C', 26, 'H')\n   (np.float64(1.09), 19, 'C', 28, 'H')\n   (np.float64(1.09), 20, 'C', 32, 'H')\n   (np.float64(1.09), 33, 'C', 52, 'H')\n   (np.float64(1.09), 33, 'C', 53, 'H')\n   (np.float64(1.09), 34, 'C', 54, 'H')\n   (np.float64(1.09), 34, 'C', 55, 'H')\n   (np.float64(1.09), 35, 'C', 56, 'H')\nH-H < 1.8: 27 [(np.float64(1.75), 27, 28), (np.float64(1.75), 28, 29), (np.float64(1.75), 31, 32), (np.float64(1.75), 72, 73), (np.float64(1.76), 27, 29), (np.float64(1.76), 30, 31), (np.float64(1.76), 30, 32), (np.float64(1.76), 54, 55)]\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:21"
+ },
+ {
+  "type": "AIMessage",
+  "content": "",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "grep -iE \"converged|gradient|energy\" opt1.log | tail -5; echo \"---\"; grep -c \"\" opt1.xyz"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 131976,
+   "output_tokens": 555,
+   "total_tokens": 132531
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "         :: SCC energy              -140.896681490648 Eh    ::\n         :: repulsion energy           1.633120542114 Eh    ::\n         #    Occupation            Energy/Eh            Energy/eV\n          | TOTAL ENERGY             -139.263268665774 Eh   |\n          | GRADIENT NORM               0.000650399091 Eh/\u03b1 |\n---\n96\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:22"
+ },
+ {
+  "type": "AIMessage",
+  "content": "The optimization converged well (gradient norm 0.00065). Now let me save the final structure as `answer.xyz`:",
+  "tool_calls": [
+   {
+    "name": "bash_kernel",
+    "args": {
+     "command": "python3 -c \"\nlines = open('opt1.xyz').read().splitlines()\nlines[1] = 'Rh(III) complex: kappa2-N,Si-[2-(dimethylsilyloxy)-4,8-dimethylquinoline], hydride, triflate, PCy3'\nopen('answer.xyz','w').write('\\n'.join(lines) + '\\n')\nprint(lines[0]); print(lines[1])\n\" && ls -la answer.xyz && head -6 answer.xyz && tail -3 answer.xyz"
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 132644,
+   "output_tokens": 270,
+   "total_tokens": 132914
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "94\nRh(III) complex: kappa2-N,Si-[2-(dimethylsilyloxy)-4,8-dimethylquinoline], hydride, triflate, PCy3\n-rw-r--r-- 1 root root 7434 Oct  6 22:09 answer.xyz\n94\nRh(III) complex: kappa2-N,Si-[2-(dimethylsilyloxy)-4,8-dimethylquinoline], hydride, triflate, PCy3\nRh          -0.13094888205709       -0.00930209971066       -0.14633303123955\nN           -0.17616151791096        2.17742282457427        0.03891428074615\nC           -1.32557851406447        2.67130711453755        0.45939577627362\nC           -1.50578001745266        4.04662453890286        0.72940632005424\nF            2.93551735557111        0.92134558781471        3.14323952484530\nF            2.01798365842126        2.11720708906034        4.68840704284703\nH           -0.59606543182256       -0.00416144604922       -1.61842840044831\n",
+  "name": "bash_kernel",
+  "tool_call_id": "bash_kernel:23"
+ },
+ {
+  "type": "AIMessage",
+  "content": "Let me do a final visual verification of `answer.xyz` from an orientation matching the 2D drawing:",
+  "tool_calls": [
+   {
+    "name": "view_molecule",
+    "args": {
+     "xyz_file_relative_path": "answer.xyz",
+     "left_right_deg": 25,
+     "up_down_deg": -15,
+     "reset_view": true
+    }
+   }
+  ],
+  "usage": {
+   "input_tokens": 133259,
+   "output_tokens": 154,
+   "total_tokens": 133413
+  }
+ },
+ {
+  "type": "ToolMessage",
+  "content": "[image]",
+  "name": "view_molecule",
+  "tool_call_id": "view_molecule:24"
+ },
+ {
+  "type": "AIMessage",
+  "content": "The structure is complete and verified. `answer.xyz` exists in the working directory.\n\n## Summary\n\nThe 2D drawing depicts a **cationic-free Rh(III) complex** with five ligands in a square-pyramidal arrangement. I built the 3D structure as follows:\n\n**Molecular composition (C\u2083\u2082H\u2085\u2080F\u2083NO\u2084PRhSi, 94 atoms):**\n- **\u03ba\u00b2-(N,Si) chelate**: 2-(dimethylsilyloxy)-4,8-dimethylquinoline \u2014 the quinoline N coordinates Rh while the 2-O-SiMe\u2082 group forms a Rh\u2013Si bond, closing a 5-membered N\u2013C\u2013O\u2013Si\u2013Rh chelate ring (the `*Si` is part of this chiral-at-metal unit)\n- **Hydride** (Rh\u2013H), placed behind the chelate plane per the hashed wedge\n- **\u03ba\u00b9-Triflate** (Rh\u2013O\u2013SO\u2082\u2013CF\u2083), placed in front per the solid wedge\n- **PCy\u2083** (tricyclohexylphosphine), trans to the quinoline N\n\n**Construction & validation:**\n1. Built the chelate ligand geometrically (planar quinoline, N\u2013C\u2082\u2013O\u2013Si chain triangulated to close the chelate with an 82\u00b0 bite angle), with idealized tetrahedral Si-Me\u2082 and methyls at the 4- and 8-positions\n2. Placed PCy\u2083 (RDKit conformer) and triflate around Rh, then ran a clash-minimization scan over the fragment twists/methyl rotations to remove steric overlaps\n3. Optimized with GFN2-xTB under distance constraints on the five Rh\u2013donor bonds to preserve the drawn stereochemistry\n\n**Final geometry** (all within ~0.5% of target): Rh\u2013N 2.20 \u00c5, Rh\u2013Si 2.37 \u00c5, Rh\u2013P 2.39 \u00c5, Rh\u2013O(OTf) 2.15 \u00c5, Rh\u2013H 1.54 \u00c5; N\u2013Rh\u2013P 175\u00b0 (trans), chelate bite N\u2013Rh\u2013Si 82\u00b0, quinoline planar (rms 0.03 \u00c5), all bond lengths and the drawn enantiomeric configuration (H behind / OTf in front) retained.",
+  "usage": {
+   "input_tokens": 134789,
+   "output_tokens": 864,
+   "total_tokens": 135653
+  }
+ }
+]
