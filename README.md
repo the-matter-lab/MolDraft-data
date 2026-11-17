@@ -2,6 +2,8 @@
 
 Data, submitted structures, evaluation records, and verifier for **Can Language Models Build Molecules in Three Dimensions?**
 
+**[Explore the public MolDraft leaderboard](https://the-matter-lab.github.io/MolDraft-data/)** — interactive scores, costs, tokens, and total-atom charts.
+
 The release version and Git tag are **v18**. The result set is `moldraft.formal/v18`; every main-experiment and two-tool ablation verdict uses `moldraft.stereochemistry/v18`.
 
 ## Dataset
@@ -63,3 +65,13 @@ python tools/summarize_results.py
 ## Sources and rights
 
 Source-specific conditions apply to third-party drawings and coordinates. See `data/references.tsv`, `data/REFERENCES.md`, and `SOURCE_NOTICES.md`. This repository does not assign a blanket licence to third-party material.
+
+## Website
+
+GitHub Pages publishes the static website from `docs/`. The source is in `website/` and reads these v18 result records directly. To rebuild and refresh file checksums:
+
+```bash
+python website/build.py --check
+python tools/update_checksums.py
+python tools/check_integrity.py
+```
