@@ -16,6 +16,7 @@ import html
 import json
 import math
 import re
+import shutil
 import statistics
 import sys
 from html.parser import HTMLParser
@@ -33,6 +34,7 @@ META = HERE / "models_meta.json"
 
 Z95 = 1.959963984540054
 SOURCE_ORDER = ["vsepr", "np", "literature"]
+SOURCE_CATEGORIES = {"vsepr": "VSEPR-curated", "np": "natural-product", "literature": "literature"}
 
 # Text that must never appear in the shipped site: molecule names and question ids.
 LEAK_PATTERNS = [
@@ -87,7 +89,6 @@ def is_pass(row):
 def build_doc() -> dict:
     release, index, settings, metrics, meta = load_inputs()
     categories = {row["id"]: row["category"] for row in index}
-    source_categories = {"vsepr": "VSEPR-curated", "np": "natural-product", "literature": "literature"}
     efforts = {row["id"]: row["reasoning_effort"] for row in settings["models"]}
     source_paths = ["release.json", "data/index.csv", "configuration/models.json", "configuration/user_prompt.txt", "analysis/results_metrics.json"]
     meta["benchmark"]["prompt"] = (DATA_REPO / "configuration/user_prompt.txt").read_text().strip()
@@ -123,7 +124,7 @@ def build_doc() -> dict:
         assert math.isclose((inp + out) / 300, metrics["resources"][model]["tokens"], abs_tol=1e-8)
         by_source = {}
         for key in SOURCE_ORDER:
-            group = [row for row in rows if categories[row["name"]] == source_categories[key]]
+            group = [row for row in rows if categories[row["name"]] == SOURCE_CATEGORIES[key]]
             bp = sum(is_pass(row) for row in group)
             blo, bhi = wilson(bp, len(group))
             metric_key = {"vsepr": "VSEPR", "np": "natural_product", "literature": "literature"}[key]
@@ -171,7 +172,7 @@ def build_doc() -> dict:
         entry["rank"] = rank
     assert sum(entry["passed"] for entry in entries) == 1419
     sources = {key: dict(label=meta["sources"][key]["label"], short=meta["sources"][key]["short"],
-                        n=sum(row["category"] == source_categories[key] for row in index))
+                        n=sum(row["category"] == SOURCE_CATEGORIES[key] for row in index))
                for key in SOURCE_ORDER}
     return dict(schema_version=1, release_version="v18", result_set="moldraft.formal/v18",
                 generated_at=dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
@@ -221,12 +222,62 @@ def logo_sprite() -> str:
             + "".join(parts) + "</svg>")
 
 
+def render_header(site: dict, gallery: bool = False) -> str:
+    return ((TEMPLATES / "header.html").read_text().rstrip()
+            .replace("__HOME_URL__", "./" if gallery else "")
+            .replace("__GITHUB_URL__", html.escape(site["github_url"], quote=True))
+            .replace("__GALLERY_CURRENT__", ' aria-current="page"' if gallery else ""))
+
+
+def render_gallery(doc: dict) -> None:
+    with (DATA_REPO / "data/index.csv").open(newline="") as handle:
+        records = list(csv.DictReader(handle))
+    image_dir = SITE / "gallery-images"
+    image_dir.mkdir(exist_ok=True)
+    groups, links = [], []
+    for key in SOURCE_ORDER:
+        source = doc["sources"][key]
+        label = html.escape(source["label"])
+        cards = []
+        for position, row in enumerate(records, start=1):
+            if row["category"] != SOURCE_CATEGORIES[key]:
+                continue
+            filename = f"drawing-{position:03d}.png"
+            shutil.copyfile(DATA_REPO / "data" / row["image"], image_dir / filename)
+            image_url = f"gallery-images/{filename}"
+            atoms = int(row["total_atoms"])
+            cards.append(
+                f'      <li><a class="gallery-card" href="{image_url}">'
+                f'<img src="{image_url}" alt="2D drawing {position}, {label.lower()}" loading="lazy" decoding="async">'
+                f'<span>{atoms} atoms</span></a></li>'
+            )
+        links.append(f'<a href="#{key}">{label} ({source["n"]})</a>')
+        groups.append(
+            f'  <section class="gallery-group" id="{key}" aria-labelledby="{key}-heading">\n'
+            f'    <h2 id="{key}-heading">{label} <span>({source["n"]})</span></h2>\n'
+            '    <ul class="gallery-grid">\n' + "\n".join(cards) + "\n    </ul>\n  </section>"
+        )
+    template = (TEMPLATES / "gallery.html").read_text()
+    substitutions = {
+        "__SITE_TITLE__": html.escape(doc["site"]["title"]),
+        "__SITE_HEADER__": render_header(doc["site"], gallery=True),
+        "__STYLE_HASH__": sha256(SITE / "assets/style.css")[:12],
+        "__N_MOLECULES__": str(len(records)),
+        "__GITHUB_URL__": html.escape(doc["site"]["github_url"], quote=True),
+        "__GALLERY_LINKS__": "\n    " + "\n    ".join(links) + "\n    ",
+        "__GALLERY_GROUPS__": "\n".join(groups),
+    }
+    for key, value in substitutions.items():
+        template = template.replace(key, value)
+    (SITE / "data_300_new.html").write_text(template)
+
+
 def render_page(doc: dict, template: Path | None = None, out: Path | None = None) -> Path | None:
     tpl = template or TEMPLATES / "index.html"
     if not tpl.exists():
         print(f"  (no {tpl.relative_to(HERE.parent.parent)}; page not rendered)")
         return None
-    text = tpl.read_text()
+    text = tpl.read_text().replace("__SITE_HEADER__", render_header(doc["site"]))
     if "__LEADERBOARD_JSON__" not in text:
         sys.exit("templates/index.html has no __LEADERBOARD_JSON__ placeholder")
     charts_markup = doc.pop("_charts_markup", None)
@@ -344,6 +395,17 @@ def check_site() -> int:
                     problems.append(f"charts/{variant}.svg still contains CSS variables")
     else:
         problems.append("site/data/leaderboard.json missing")
+    gallery = SITE / "data_300_new.html"
+    if gallery.exists():
+        parser = _Refs()
+        parser.feed(gallery.read_text())
+        for ref in sorted(set(parser.refs)):
+            if ref and not (SITE / ref).is_file() and not (SITE / ref).is_dir():
+                problems.append(f"{gallery.name} references missing file: {ref}")
+        if len({ref for ref in parser.refs if ref.startswith("gallery-images/")}) != 300:
+            problems.append("gallery must link all 300 original drawings")
+    else:
+        problems.append(f"{gallery.name} missing")
     # Leak scan over every text file shipped.
     for f in SITE.rglob("*"):
         if f.is_file() and f.suffix.lower() in {".html", ".css", ".js", ".json", ".svg", ".txt", ".md"}:
@@ -397,6 +459,7 @@ def main() -> int:
         out.write_text(json.dumps(doc, indent=1, ensure_ascii=False) + "\n")
         print(f"  wrote {out}  ({len(doc['entries'])} entries)")
         doc["_charts_markup"] = charts_markup
+        render_gallery(doc)
         page = render_page(doc, args.template, args.out_html)
         if page:
             try:

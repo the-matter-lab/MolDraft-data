@@ -491,10 +491,11 @@ def charts_html(doc: dict) -> tuple[str, dict]:
             series = bin_series(ab, entries, mode, orgs)
             if not series:
                 continue
-            svgs.append(f'<div class="atoms-mode" data-mode="{escape(mode)}"{"" if mode == "all" else " hidden"}>\n'
+            selected = mode == "top5"
+            svgs.append(f'<div class="atoms-mode" data-mode="{escape(mode)}"{"" if selected else " hidden"}>\n'
                         + render_bins_svg(ab, series=series, mode=mode, title_id=f"chart-atoms-{mode}-title") + '\n</div>')
             chips.append(f'<button type="button" class="chip" data-mode="{escape(mode)}" '
-                         f'aria-pressed="{"true" if mode == "all" else "false"}">{escape(label)}</button>')
+                         f'aria-pressed="{str(selected).lower()}">{escape(label)}</button>')
         html_parts.append(
             '<div class="view" data-view="atoms" hidden>\n'
             '  <div class="card chart-card">\n'
