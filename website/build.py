@@ -3,7 +3,7 @@
 
 All displayed rates, costs, tokens, source categories, and atom-count bins are
 computed from v18 records and checked against the manuscript analysis outputs.
-Only aggregate records are exported to the static site.
+Scores are exported as aggregates. A verified example is shown in the homepage demo.
 """
 from __future__ import annotations
 
@@ -242,7 +242,6 @@ def render_page(doc: dict, template: Path | None = None, out: Path | None = None
         "__GENERATED_DATE__": display_date(doc["generated_at"][:10]),
         "__SITE_TITLE__": site["title"],
         "__HERO_TITLE__": site["hero_title"],
-        "__HERO_VERSION__": site["version"],
         "__TAGLINE__": site["tagline"],
         "__GITHUB_URL__": site["github_url"],
         "__CARD_FOOTER__": site["card_footer"],
@@ -270,7 +269,7 @@ class _Refs(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         a = dict(attrs)
-        for key in ("src", "href"):
+        for key in ("src", "href", "data-animation", "data-poster"):
             v = a.get(key)
             if v and not v.startswith(("http://", "https://", "#", "mailto:", "data:")):
                 self.refs.append(v.split("#")[0].split("?")[0])
@@ -353,7 +352,7 @@ def check_site() -> int:
                     problems.append(f"{f.relative_to(SITE)}: leak pattern {pat.pattern!r} matched {m.group(0)!r}")
     # Nothing but the expected file types.
     for f in SITE.rglob("*"):
-        if f.is_file() and f.name != ".nojekyll" and f.suffix.lower() not in {".html", ".css", ".js", ".json", ".svg", ".woff2", ".png", ".ico", ".txt", ".md", ".webmanifest"}:
+        if f.is_file() and f.name != ".nojekyll" and f.suffix.lower() not in {".html", ".css", ".js", ".json", ".svg", ".woff2", ".png", ".gif", ".ico", ".txt", ".md", ".webmanifest"}:
             problems.append(f"unexpected file type shipped: {f.relative_to(SITE)}")
     if problems:
         print("CHECK FAILED:")

@@ -22,4 +22,14 @@ python tools/check_integrity.py
 
 The builder reads `release.json`, the dataset index, model configuration, per-model v18 verification records, summaries, resource-use tables, and `analysis/results_metrics.json`. It checks all model totals, the three source categories, costs, tokens, and the five total-atom bins against the manuscript analysis. The verifier description covers identity, stereochemical configuration, and coarse coordination geometry.
 
-Only aggregate statistics are exported into the website. Input drawings, molecule identifiers, and per-molecule answers are accessed through the separate data repository link. The site requires no backend and uses relative asset paths suitable for a GitHub Pages project URL.
+Scores are exported as aggregate statistics. The introduction also pairs one original input drawing with a rotating view of a verified model-generated answer. All remaining drawings and per-molecule records are accessed through the data repository link. The site requires no backend and uses relative asset paths suitable for a GitHub Pages project URL.
+
+## Rebuild the molecule demonstration
+
+The checked-in GIF and still frame need no rendering dependencies to serve or build the website. To regenerate them, install NumPy and Pillow in a separate environment and run:
+
+```bash
+python website/render_demo.py
+```
+
+`website/demo/source.json` records the exact input drawing, generated answer, verification record, and their hashes. `website/demo/structure.npz` contains the corresponding verifier-owned single-point arrays. The renderer confirms that the coordinates match the deposited generated answer and that it passes all three v18 checks before producing a rigid rotation. The original coordinates are never optimized or replaced. GIF playback can be paused and defaults to a still frame when reduced motion is requested.
