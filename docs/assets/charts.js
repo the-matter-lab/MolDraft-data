@@ -26,6 +26,10 @@
     for (var j = 0; j < btns.length; j++) {
       btns[j].setAttribute('aria-pressed', btns[j].getAttribute('data-view') === name ? 'true' : 'false');
     }
+    var details = doc.querySelectorAll('[data-table-only]');
+    for (var k = 0; k < details.length; k++) {
+      details[k].hidden = name !== 'table';
+    }
     if (push && window.history && window.history.replaceState) {
       try {
         var url = new URL(window.location.href);
@@ -46,6 +50,12 @@
     for (var i = 0; i < btns.length; i++) {
       btns[i].addEventListener('click', function (ev) {
         setView(ev.currentTarget.getAttribute('data-view'), true);
+      });
+    }
+    var aboutLinks = doc.querySelectorAll('a[href="#about"]');
+    for (var j = 0; j < aboutLinks.length; j++) {
+      aboutLinks[j].addEventListener('click', function () {
+        setView('table', true);
       });
     }
     setView(initialView(), false);

@@ -24,6 +24,8 @@ The builder reads `release.json`, the dataset index, model configuration, per-mo
 
 Scores are exported as aggregate statistics. Below the leaderboard, a demonstration pairs one original input drawing with a rotating view of a verified model-generated answer, followed by the explanatory text. All remaining drawings and per-molecule records are accessed through the data repository link. The site requires no backend and uses relative asset paths suitable for a GitHub Pages project URL.
 
+The Table view includes the demonstration, explanatory text, and footer. Cost/Molecule, Tokens, and Atoms show their chart panels and hide those lower sections. Returning to Table or following an About link restores the full page. Direct `?view=` links use the same behavior.
+
 ## Rebuild the molecule demonstration
 
 The checked-in GIF and still frame need no rendering dependencies to serve or build the website. To regenerate them, install NumPy and Pillow in a separate environment and run:
