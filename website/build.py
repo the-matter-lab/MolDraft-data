@@ -241,6 +241,7 @@ def render_page(doc: dict, template: Path | None = None, out: Path | None = None
         "__GENERATED_AT__": doc["generated_at"],
         "__GENERATED_DATE__": display_date(doc["generated_at"][:10]),
         "__SITE_TITLE__": site["title"],
+        "__STYLE_HASH__": sha256(SITE / "assets/style.css")[:12],
         "__HERO_TITLE__": site["hero_title"],
         "__TAGLINE__": site["tagline"],
         "__GITHUB_URL__": site["github_url"],
