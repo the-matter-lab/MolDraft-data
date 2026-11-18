@@ -22,7 +22,7 @@ python tools/check_integrity.py
 
 The builder reads `release.json`, the dataset index, model configuration, per-model v18 verification records, summaries, resource-use tables, and `analysis/results_metrics.json`. It checks all model totals, the three source categories, costs, tokens, and the five total-atom bins against the manuscript analysis. The verifier description covers identity, stereochemical configuration, and coarse coordination geometry.
 
-Scores are exported as aggregate statistics. The introduction also pairs one original input drawing with a rotating view of a verified model-generated answer. All remaining drawings and per-molecule records are accessed through the data repository link. The site requires no backend and uses relative asset paths suitable for a GitHub Pages project URL.
+Scores are exported as aggregate statistics. Below the leaderboard, a demonstration pairs one original input drawing with a rotating view of a verified model-generated answer, followed by the explanatory text. All remaining drawings and per-molecule records are accessed through the data repository link. The site requires no backend and uses relative asset paths suitable for a GitHub Pages project URL.
 
 ## Rebuild the molecule demonstration
 
