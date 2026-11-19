@@ -1,6 +1,6 @@
 # References — 300-molecule dataset
 
-Every entry in `manifest.tsv` traces to the sources below. `references.tsv` (same folder) gives, for each of the 300 molecules, where its 3D coordinates came from, its database identifier, and the reference numbers used here; this file is the numbered list.
+The [dataset index](index.csv) lists all 300 molecules. The [provenance table](references.tsv) records the sources of each 2D drawing and 3D reference, its database identifier, and the corresponding reference numbers from this bibliography.
 
 ## Where each part of the set comes from
 

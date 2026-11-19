@@ -7,8 +7,8 @@
 <p align="center"><strong>Can Language Models Build Molecules in Three Dimensions?</strong></p>
 
 <p align="center">
-  <a href="https://the-matter-lab.github.io/MolDraft-data/">Leaderboard</a> ·
-  <a href="https://the-matter-lab.github.io/MolDraft-data/data_300_new.html">2D Data Gallery</a> ·
+  <a href="#dataset-and-results">Dataset and results</a> ·
+  <a href="website/README.md#preview-the-website">Preview the website</a> ·
   <a href="https://github.com/the-matter-lab/MolDraft-data/releases/latest">Download release</a> ·
   <a href="#citation">Citation</a>
 </p>
@@ -26,7 +26,7 @@ The benchmark contains **300 drawing–structure pairs** across 59 VSEPR-curated
 | Model scores | [Main results summary](results/final_results/summary.csv) and [model and ablation comparison](results/final_results/accuracy_all_models_and_ablations.csv) |
 | Main answers, sessions, and verdicts | [Answer index](results/final_results/answer_index.csv), [per-model records](results/final_results), and [combined verdicts](results/final_results/verification_2700.json) |
 | Paired tool ablation | [Ablation records](results/two_tool_ablation) and [per-molecule comparison](results/two_tool_ablation/eval/comparison.csv) |
-| Prompts and model settings | [configuration/](configuration) |
+| Prompts and model settings | [Main run settings](configuration) and [ablation run configuration](results/two_tool_ablation/eval/run_config.json) |
 | Manuscript analysis | [analysis/](analysis) |
 
 The release includes 2,605 main answers, 300 ablation answers, and all 3,000 session transcripts. Attempts without an answer count as failures.
@@ -46,11 +46,11 @@ The [integrity check](VALIDATION.md) verifies file hashes, dataset completeness,
 
 ## Evaluation setup
 
-The benchmark uses Estructural, built on El Agente (AgentNet). Each molecule gets one attempt of at most 100 model calls. The agent runs without network access or access to the reference structures. The [project's Setup section](https://the-matter-lab.github.io/MolDraft-data/#about) links to the agent and tool implementations on GitHub. The [run configuration](configuration) and [Estructural case studies](https://github.com/the-matter-lab/ElAgenteEstructuralCaseStudies) are publicly available.
+The benchmark uses Estructural, built on [El Agente (AgentNet)](https://github.com/the-matter-lab/ElAgente). Each molecule gets one attempt of at most 100 model calls. The agent runs without network access or access to the reference structures. The [local website preview](website/README.md#preview-the-website) links to the four tool implementations. The [Estructural case studies](https://github.com/the-matter-lab/ElAgenteEstructuralCaseStudies) are public.
 
 ## Sources and rights
 
-The [2D Data Gallery](https://the-matter-lab.github.io/MolDraft-data/data_300_new.html) shows sources for each drawing and its reference structure. See [dataset references](data/REFERENCES.md), [per-molecule provenance](data/references.tsv), and [source notices](SOURCE_NOTICES.md) for attribution and source-specific licence terms.
+The 2D Data Gallery in the [local website preview](website/README.md#preview-the-website) shows sources for each drawing and reference structure. The same records are in the [dataset bibliography](data/REFERENCES.md) and [per-molecule provenance table](data/references.tsv). See [source notices](SOURCE_NOTICES.md) for attribution and licence terms.
 
 ## Citation
 

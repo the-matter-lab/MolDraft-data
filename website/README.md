@@ -1,18 +1,20 @@
 # MolDraft website
 
-Static leaderboard and interactive cost, token, and total-atom charts for MolDraft v18. All scores and chart aggregates are computed from the public v18 data release and checked against its manuscript analysis outputs.
+The MolDraft website contains the leaderboard, interactive charts, and 2D Data Gallery. The checked-in site is in [`docs/`](../docs), and its builder and templates are in this directory.
 
-## Build in this workspace
+## Preview the website
+
+From the repository root, serve the checked-in site:
 
 ```bash
-python structure_2d_to_3d/moldraft/build.py --data-repo /path/to/MolDraft-data --check
+python -m http.server 8000 --bind 127.0.0.1 --directory docs
 ```
 
-This updates `site/`. `--check-only` verifies the existing output. `--site-dir` selects another output directory.
+Open the [leaderboard](http://127.0.0.1:8000/) or the [2D Data Gallery](http://127.0.0.1:8000/data_300_new.html) in your browser.
 
-## Build in the public data repository
+## Rebuild from the dataset
 
-The website source is in `website/`, and GitHub Pages serves `docs/`:
+From the repository root:
 
 ```bash
 python website/build.py --check
@@ -20,7 +22,7 @@ python tools/update_checksums.py
 python tools/check_integrity.py
 ```
 
-The builder reads `release.json`, the dataset index, model configuration, per-model v18 verification records, summaries, resource-use tables, and `analysis/results_metrics.json`. It checks all model totals, the three source categories, costs, tokens, and the five total-atom bins against the manuscript analysis. The verifier description covers identity, stereochemical configuration, and coarse coordination geometry.
+The builder reads the release metadata, dataset index, model settings, and evaluation records. It checks model totals, categories, costs, tokens, and atom-count bins against the manuscript analysis. Use `python website/build.py --check-only` to validate the existing site. GitHub Pages can serve `docs/` when hosting is enabled.
 
 Scores are exported as aggregate statistics. Below the leaderboard, a demonstration pairs one original input drawing with a rotating view of a verified model-generated answer, followed by the explanatory text. The 2D Data Gallery copies the 300 original PNGs from the release and links each entry to its sources using the dataset index, provenance table, and bibliography. Per-molecule evaluation records are accessed through the data repository link. The site requires no backend and uses relative asset paths suitable for a GitHub Pages project URL.
 
