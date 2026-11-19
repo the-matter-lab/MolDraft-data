@@ -7,8 +7,8 @@
 <p align="center"><strong>Can Language Models Build Molecules in Three Dimensions?</strong></p>
 
 <p align="center">
-  <a href="#dataset-and-results">Dataset and results</a> ·
-  <a href="website/README.md#preview-the-website">Preview the website</a> ·
+  <a href="https://the-matter-lab.github.io/MolDraft-data/">Leaderboard</a> ·
+  <a href="https://the-matter-lab.github.io/MolDraft-data/data_300_new.html">2D Data Gallery</a> ·
   <a href="https://github.com/the-matter-lab/MolDraft-data/releases/latest">Download release</a> ·
   <a href="#citation">Citation</a>
 </p>
@@ -46,11 +46,11 @@ The [integrity check](VALIDATION.md) verifies file hashes, dataset completeness,
 
 ## Evaluation setup
 
-The benchmark uses Estructural, built on [El Agente (AgentNet)](https://github.com/the-matter-lab/ElAgente). Each molecule gets one attempt of at most 100 model calls. The agent runs without network access or access to the reference structures. The [local website preview](website/README.md#preview-the-website) links to the four tool implementations. The [Estructural case studies](https://github.com/the-matter-lab/ElAgenteEstructuralCaseStudies) are public.
+The benchmark uses Estructural, built on [El Agente (AgentNet)](https://github.com/the-matter-lab/ElAgente). Each molecule gets one attempt of at most 100 model calls. The agent runs without network access or access to the reference structures. The [website's Setup section](https://the-matter-lab.github.io/MolDraft-data/#about) links to the four tool implementations. The [Estructural case studies](https://github.com/the-matter-lab/ElAgenteEstructuralCaseStudies) are public.
 
 ## Sources and rights
 
-The 2D Data Gallery in the [local website preview](website/README.md#preview-the-website) shows sources for each drawing and reference structure. The same records are in the [dataset bibliography](data/REFERENCES.md) and [per-molecule provenance table](data/references.tsv). See [source notices](SOURCE_NOTICES.md) for attribution and licence terms.
+The [2D Data Gallery](https://the-matter-lab.github.io/MolDraft-data/data_300_new.html) shows sources for each drawing and reference structure. The same records are in the [dataset bibliography](data/REFERENCES.md) and [per-molecule provenance table](data/references.tsv). See [source notices](SOURCE_NOTICES.md) for attribution and licence terms.
 
 ## Citation
 
