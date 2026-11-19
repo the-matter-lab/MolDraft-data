@@ -229,9 +229,42 @@ def render_header(site: dict, gallery: bool = False) -> str:
             .replace("__GALLERY_CURRENT__", ' aria-current="page"' if gallery else ""))
 
 
+def gallery_sources(row: dict, publications: dict, bibliography_url: str) -> str:
+    def reference_links(numbers: str) -> str:
+        links = []
+        for number in numbers.split(","):
+            if number:
+                url = html.escape(publications[int(number)] or bibliography_url, quote=True)
+                links.append(f'<a href="{url}">[{int(number)}]</a>')
+        return " ".join(links)
+
+    if row["drawing_url"]:
+        image_source = f'<a href="{html.escape(row["drawing_url"], quote=True)}">Original source page</a>'
+    else:
+        image_source = reference_links(row["drawing_ref_no"]) or "Drawn from the reference coordinates"
+    reference = html.escape(row["identifier"])
+    citations = reference_links(row["xyz_ref_no"])
+    primary = reference_links(row["primary_ref_no"])
+    return (
+        '<details class="gallery-sources"><summary>Sources</summary><dl>'
+        f'<dt>2D drawing</dt><dd>{image_source}</dd>'
+        f'<dt>3D reference</dt><dd>{reference} {citations}</dd>'
+        + (f'<dt>Primary publication</dt><dd>{primary}</dd>' if primary else "")
+        + '</dl></details>'
+    )
+
+
 def render_gallery(doc: dict) -> None:
     with (DATA_REPO / "data/index.csv").open(newline="") as handle:
         records = list(csv.DictReader(handle))
+    with (DATA_REPO / "data/references.tsv").open(newline="") as handle:
+        provenance = {row["name"]: row for row in csv.DictReader(handle, delimiter="\t")}
+    bibliography_url = doc["site"]["github_url"] + "/blob/main/data/REFERENCES.md"
+    publications = {}
+    for line in (DATA_REPO / "data/REFERENCES.md").read_text().splitlines():
+        if match := re.match(r"^(\d+)\. (.*)$", line):
+            link = re.search(r"https://[^\s]+", match[2])
+            publications[int(match[1])] = link[0].rstrip(".,") if link else None
     image_dir = SITE / "gallery-images"
     image_dir.mkdir(exist_ok=True)
     groups, links = [], []
@@ -249,7 +282,9 @@ def render_gallery(doc: dict) -> None:
             cards.append(
                 f'      <li><a class="gallery-card" href="{image_url}">'
                 f'<img src="{image_url}" alt="2D drawing {position}, {label.lower()}" loading="lazy" decoding="async">'
-                f'<span>{atoms} atoms</span></a></li>'
+                f'<span>{atoms} atoms</span></a>'
+                + gallery_sources(provenance[row["id"]], publications, bibliography_url)
+                + '</li>'
             )
         links.append(f'<a href="#{key}">{label} ({source["n"]})</a>')
         groups.append(
@@ -262,6 +297,7 @@ def render_gallery(doc: dict) -> None:
         "__SITE_TITLE__": html.escape(doc["site"]["title"]),
         "__SITE_HEADER__": render_header(doc["site"], gallery=True),
         "__STYLE_HASH__": sha256(SITE / "assets/style.css")[:12],
+        "__APP_HASH__": sha256(SITE / "assets/app.js")[:12],
         "__N_MOLECULES__": str(len(records)),
         "__GITHUB_URL__": html.escape(doc["site"]["github_url"], quote=True),
         "__GALLERY_LINKS__": "\n    " + "\n    ".join(links) + "\n    ",
@@ -293,6 +329,7 @@ def render_page(doc: dict, template: Path | None = None, out: Path | None = None
         "__GENERATED_DATE__": display_date(doc["generated_at"][:10]),
         "__SITE_TITLE__": site["title"],
         "__STYLE_HASH__": sha256(SITE / "assets/style.css")[:12],
+        "__APP_HASH__": sha256(SITE / "assets/app.js")[:12],
         "__CHARTS_HASH__": sha256(SITE / "assets/charts.js")[:12],
         "__HERO_TITLE__": site["hero_title"],
         "__TAGLINE__": site["tagline"],

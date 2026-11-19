@@ -1,4 +1,4 @@
-# MolDraft v18 website
+# MolDraft website
 
 Static leaderboard and interactive cost, token, and total-atom charts for MolDraft v18. All scores and chart aggregates are computed from the public v18 data release and checked against its manuscript analysis outputs.
 
@@ -22,7 +22,7 @@ python tools/check_integrity.py
 
 The builder reads `release.json`, the dataset index, model configuration, per-model v18 verification records, summaries, resource-use tables, and `analysis/results_metrics.json`. It checks all model totals, the three source categories, costs, tokens, and the five total-atom bins against the manuscript analysis. The verifier description covers identity, stereochemical configuration, and coarse coordination geometry.
 
-Scores are exported as aggregate statistics. Below the leaderboard, a demonstration pairs one original input drawing with a rotating view of a verified model-generated answer, followed by the explanatory text. The 2D Data Gallery is generated from the dataset index and copies the 300 original PNGs from the release. Per-molecule evaluation records are accessed through the data repository link. The site requires no backend and uses relative asset paths suitable for a GitHub Pages project URL.
+Scores are exported as aggregate statistics. Below the leaderboard, a demonstration pairs one original input drawing with a rotating view of a verified model-generated answer, followed by the explanatory text. The 2D Data Gallery copies the 300 original PNGs from the release and links each entry to its sources using the dataset index, provenance table, and bibliography. Per-molecule evaluation records are accessed through the data repository link. The site requires no backend and uses relative asset paths suitable for a GitHub Pages project URL.
 
 The Table view includes the demonstration, explanatory text, and footer. Cost/Molecule, Tokens, and Atoms show their chart panels and hide those lower sections. Atoms initially shows Top 5. Returning to Table or following an About link restores the full page. Direct `?view=` links use the same behavior.
 

@@ -286,18 +286,26 @@
   function setupSentences(agent, entries) {
     var name = str(agent.name);
     var framework = str(agent.framework);
+    var github = obj(agent.github);
+    var toolLinks = obj(github.tools);
     var isolation = str(agent.isolation);
     var tools = arr(agent.tools).filter(str);
     var maxCalls = num(agent.max_llm_calls);
     var attempts = num(agent.attempts_per_molecule);
     var sentences = [];
 
+    function linkedLabel(href, label) {
+      return str(href) ? el('a', { href: href }, [label]) : label;
+    }
+
     var lead = [];
-    if (name) lead.push('The agent is ' + name);
-    if (framework) lead.push((lead.length ? ', built on ' : 'The agent is built on ') + framework);
+    if (name) lead.push('The agent is ', linkedLabel(github.agent, name));
+    if (framework) lead.push(lead.length ? ', built on ' : 'The agent is built on ', linkedLabel(github.framework, framework));
     if (tools.length) {
       lead.push((lead.length ? ', with ' : 'The agent has ') + words(tools.length) + (tools.length === 1 ? ' tool: ' : ' tools: '));
-      lead = lead.concat(joinList(tools.map(function (t) { return el('code', null, [t]); })));
+      lead = lead.concat(joinList(tools.map(function (tool) {
+        return linkedLabel(toolLinks[tool], el('code', null, [tool]));
+      })));
     }
     if (lead.length) sentences.push(lead.concat(['.']));
 
