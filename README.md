@@ -17,13 +17,14 @@ MolDraft benchmarks how well multimodal language models build 3D molecular struc
 
 ## Dataset and results
 
-The benchmark contains **300 drawing–structure pairs** across 59 VSEPR-curated structures, 70 natural products, and 171 literature structures. Across nine models, **1,419 of 2,700 attempts passed**. Resolve rates range from **25.0% to 76.0%**. In the paired GPT-6.1 Sol ablation, the two-tool setup resolves **201/300** molecules and the four-tool setup resolves **214/300**.
+The benchmark contains **300 drawing–structure pairs** across 59 VSEPR-curated structures, 70 natural products, and 171 literature structures. The current leaderboard covers ten models and **1,649 of 3,000 attempts passed**. GPT-6.2 Astra leads with **230/300 (76.7%)**. The v18 manuscript release covers nine models and 1,419 passes in 2,700 attempts. In the paired GPT-6.1 Sol ablation, the two-tool setup resolves **201/300** molecules and the four-tool setup resolves **214/300**.
 
 | What you need | Where to find it |
 | --- | --- |
 | Dataset index | [data/index.csv](data/index.csv), with category, atom counts, and paths for each pair |
 | Benchmark inputs and references | [2D drawings](data/png) and [reference XYZ structures](data/xyz) |
 | Model scores | [Main results summary](results/final_results/summary.csv) and [model and ablation comparison](results/final_results/accuracy_all_models_and_ablations.csv) |
+| GPT-6.2 Astra leaderboard run | [Per-molecule scores and usage](website/supplemental_runs/gpt-6.2-astra.json) |
 | Main answers, sessions, and verdicts | [Answer index](results/final_results/answer_index.csv), [per-model records](results/final_results), and [combined verdicts](results/final_results/verification_2700.json) |
 | Paired tool ablation | [Ablation records](results/two_tool_ablation) and [per-molecule comparison](results/two_tool_ablation/eval/comparison.csv) |
 | Prompts and model settings | [Main run settings](configuration) and [ablation run configuration](results/two_tool_ablation/eval/run_config.json) |

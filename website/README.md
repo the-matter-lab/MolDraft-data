@@ -22,7 +22,7 @@ python tools/update_checksums.py
 python tools/check_integrity.py
 ```
 
-The builder reads the release metadata, dataset index, model settings, and evaluation records. It checks model totals, categories, costs, tokens, and atom-count bins against the manuscript analysis. Use `python website/build.py --check-only` to validate the existing site. GitHub Pages can serve `docs/` when hosting is enabled.
+The builder reads the release metadata, dataset index, model settings, and evaluation records. It checks manuscript runs against the published analysis and reads newer runs from [supplemental_runs/](supplemental_runs). Supplemental runs use the same dataset and verifier. Their files record per-molecule verdicts, token usage, and the pricing used to estimate cost. Use `python website/build.py --check-only` to validate the existing site. GitHub Pages serves `docs/`.
 
 Scores are exported as aggregate statistics. Below the leaderboard, a demonstration pairs one original input drawing with a rotating view of a verified model-generated answer, followed by the explanatory text. The 2D Data Gallery copies the 300 original PNGs from the release and links each entry to its sources using the dataset index, provenance table, and bibliography. Per-molecule evaluation records are accessed through the data repository link. The site requires no backend and uses relative asset paths suitable for a GitHub Pages project URL.
 

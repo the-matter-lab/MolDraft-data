@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Build the MolDraft v18 website from the public data release.
-
-All displayed rates, costs, tokens, source categories, and atom-count bins are
-computed from v18 records and checked against the manuscript analysis outputs.
-Scores are exported as aggregates. A verified example is shown in the homepage demo.
-"""
+"""Build the MolDraft leaderboard and charts from v18 evaluation records."""
 from __future__ import annotations
 
 import argparse
@@ -86,49 +81,91 @@ def is_pass(row):
     return bool(row["overall_pass"]) and not row["verifier_error"]
 
 
+def load_supplemental_runs(release, settings):
+    runs = {}
+    for path in sorted((DATA_REPO / "website/supplemental_runs").glob("*.json")):
+        run = json.loads(path.read_text())
+        model = run["model"]
+        assert model == path.stem and model not in release["models"] and model not in runs
+        assert run["verifier"]["schema"] == release["current_verifier_version"]
+        assert run["verifier"]["mappa_commit"] == release["atom_mapper_commit"]
+        assert set(run["tools"]) == set(settings["tools"])
+        assert run["attempts_per_molecule"] == settings["attempts_per_molecule"]
+        assert run["max_input_tokens_per_call"] <= run["pricing"]["short_context_limit"]
+
+        token_fields = ("input_tokens", "cached_tokens", "output_tokens", "model_calls")
+        totals = {key: sum(row[key] for row in run["rows"]) for key in token_fields}
+        assert totals == run["usage_totals"]
+        prices = {key: decimal.Decimal(str(value))
+                  for key, value in run["pricing"]["usd_per_million"].items()}
+        costs = []
+        for row in run["rows"]:
+            assert 0 <= row["cached_tokens"] <= row["input_tokens"]
+            uncached = row["input_tokens"] - row["cached_tokens"]
+            costs.append((uncached * prices["uncached_input"] + row["cached_tokens"] * prices["cached_input"]
+                          + row["output_tokens"] * prices["output"]) / 1_000_000)
+        runs[model] = (path, run, totals, costs)
+    return runs
+
+
 def build_doc() -> dict:
     release, index, settings, metrics, meta = load_inputs()
     categories = {row["id"]: row["category"] for row in index}
     efforts = {row["id"]: row["reasoning_effort"] for row in settings["models"]}
+    supplemental = load_supplemental_runs(release, settings)
     source_paths = ["release.json", "data/index.csv", "configuration/models.json", "configuration/user_prompt.txt", "analysis/results_metrics.json"]
     meta["benchmark"]["prompt"] = (DATA_REPO / "configuration/user_prompt.txt").read_text().strip()
     cases = {}
     entries = []
-    for model, counts in release["models"].items():
+    for model in (*release["models"], *supplemental):
         mm = meta["models"][model]
-        folder = DATA_REPO / "results/final_results" / model
-        verification = json.loads((folder / "verification.json").read_text())
-        summary = json.loads((folder / "summary.json").read_text())
-        with (folder / "per_case.csv").open(newline="") as handle:
-            usage = list(csv.DictReader(handle))
+        date = None
+        if model in supplemental:
+            path, run, tokens, cost_rows = supplemental[model]
+            verification = run
+            usage = run["rows"]
+            cost = float(round(sum(cost_rows), 2))
+            cost_basis = run["pricing"]["basis"]
+            effort = run["reasoning_effort"]
+            date = run["evaluated_date"]
+            source_paths.append(str(path.relative_to(DATA_REPO)))
+        else:
+            folder = DATA_REPO / "results/final_results" / model
+            verification = json.loads((folder / "verification.json").read_text())
+            summary = json.loads((folder / "summary.json").read_text())
+            with (folder / "per_case.csv").open(newline="") as handle:
+                usage = list(csv.DictReader(handle))
+            tokens, cost, cost_basis = summary["tokens"], float(summary["cost_usd"]), summary["cost_basis"]
+            cost_rows = [float(row["cost_usd"]) for row in usage]
+            effort = efforts[model]
+            source_paths.extend(str((folder / name).relative_to(DATA_REPO))
+                                for name in ("verification.json", "summary.json", "per_case.csv"))
         rows = verification["rows"]
-        assert len(rows) == len(usage) == 300
+        assert len(rows) == len(usage) == len(index)
         assert {row["name"] for row in rows} == set(categories)
-        assert {row["verifier_version"] for row in rows} == {"moldraft.stereochemistry/v18"}
+        assert {row["verifier_version"] for row in rows} == {release["current_verifier_version"]}
         assert verification["verifier"]["schema"] == "moldraft.stereochemistry/v18"
         passed = sum(is_pass(row) for row in rows)
-        assert passed == counts["passes"] == verification["n_pass"] == summary["overall"]["passed"]
-        assert passed == metrics["resources"][model]["passed"]
+        assert passed == verification["n_pass"]
         cases[model] = rows
-        source_paths.extend(str((folder / name).relative_to(DATA_REPO))
-                            for name in ["verification.json", "summary.json", "per_case.csv"])
         errors = sum(bool(row["verifier_error"]) for row in rows)
         flags = Counter(row["flag"] for row in rows)
         lo, hi = wilson(passed, 300)
         token_rows = [int(row["input_tokens"]) + int(row["output_tokens"]) for row in usage]
-        cost_rows = [float(row["cost_usd"]) for row in usage]
-        tokens = summary["tokens"]
         inp, out, cached = (int(tokens[key]) for key in ["input_tokens", "output_tokens", "cached_tokens"])
-        cost = float(summary["cost_usd"])
-        assert math.isclose(cost / 300, metrics["resources"][model]["cost"], abs_tol=1e-10)
-        assert math.isclose((inp + out) / 300, metrics["resources"][model]["tokens"], abs_tol=1e-8)
+        if model in release["models"]:
+            assert passed == release["models"][model]["passes"] == summary["overall"]["passed"]
+            assert passed == metrics["resources"][model]["passed"]
+            assert math.isclose(cost / 300, metrics["resources"][model]["cost"], abs_tol=1e-10)
+            assert math.isclose((inp + out) / 300, metrics["resources"][model]["tokens"], abs_tol=1e-8)
         by_source = {}
         for key in SOURCE_ORDER:
             group = [row for row in rows if categories[row["name"]] == SOURCE_CATEGORIES[key]]
             bp = sum(is_pass(row) for row in group)
             blo, bhi = wilson(bp, len(group))
             metric_key = {"vsepr": "VSEPR", "np": "natural_product", "literature": "literature"}[key]
-            assert bp == metrics["sources"][metric_key]["passes"][model]
+            if model in release["models"]:
+                assert bp == metrics["sources"][metric_key]["passes"][model]
             by_source[key] = dict(label=meta["sources"][key]["label"], n=len(group), passed=bp,
                                   success_rate=round(100 * bp / len(group), 2),
                                   ci95=dict(low=round(blo, 2), high=round(bhi, 2)))
@@ -137,7 +174,7 @@ def build_doc() -> dict:
             model_id=model, display_name=mm["display_name"], organization=org,
             org_url=meta["organizations"].get(org, {}).get("url"),
             org_logo=meta["organizations"].get(org, {}).get("logo"),
-            effort=efforts[model], date=None, display_date=None,
+            effort=effort, date=date, display_date=display_date(date) if date else None,
             release_date=mm.get("release_date"),
             display_release_date=display_date(mm["release_date"]) if mm.get("release_date") else None,
             n=300, passed=passed, verifier_error=errors, judgeable=300-errors,
@@ -158,9 +195,9 @@ def build_doc() -> dict:
                         per_task_mean=round((inp+out)/300),
                         per_task_median=round(statistics.median(token_rows))),
             cost_usd=dict(total=cost, per_task_mean=cost/300,
-                          per_task_median=round(statistics.median(cost_rows), 4),
-                          basis=summary["cost_basis"],
-                          per_case_rows_match_total=abs(round(sum(cost_rows),2)-cost)<0.011),
+                          per_task_median=float(round(statistics.median(cost_rows), 4)),
+                          basis=cost_basis,
+                          per_case_rows_match_total=abs(float(round(sum(cost_rows), 2))-cost)<0.011),
             sessions_without_usage=sum(int(row["input_tokens"]) == 0 for row in usage),
             by_source=by_source, notes=[],
         ))
@@ -170,11 +207,11 @@ def build_doc() -> dict:
         if entry["passed"] != previous:
             rank, previous = i, entry["passed"]
         entry["rank"] = rank
-    assert sum(entry["passed"] for entry in entries) == 1419
+    assert sum(entry["passed"] for entry in entries if entry["model_id"] in release["models"]) == release["total_main_passes"]
     sources = {key: dict(label=meta["sources"][key]["label"], short=meta["sources"][key]["short"],
                         n=sum(row["category"] == SOURCE_CATEGORIES[key] for row in index))
                for key in SOURCE_ORDER}
-    return dict(schema_version=1, release_version="v18", result_set="moldraft.formal/v18",
+    return dict(schema_version=1, release_version="v18", result_set=release["result_set"],
                 generated_at=dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
                 site=meta["site"], benchmark=dict(meta["benchmark"], runs=len(entries)),
                 sources=sources,
@@ -195,7 +232,8 @@ def atom_size_bins(cases, index, metrics):
         for model, rows in cases.items():
             group = [row for row in rows if row["name"] in members]
             passed = sum(is_pass(row) for row in group)
-            assert passed == expected["passes"][model]
+            if model in expected["passes"]:
+                assert passed == expected["passes"][model]
             per_model[model] = dict(passed=passed, n=len(group), rate=round(100*passed/len(group),1))
             passed_all += passed
             total_all += len(group)
@@ -204,7 +242,7 @@ def atom_size_bins(cases, index, metrics):
                          models=per_model))
     assert sum(row["n"] for row in bins) == 300
     return dict(unit="total atoms, including hydrogen", n_bins=len(bins), bins=bins,
-                note="Total-atom quintile bins used in the paper; pooled rates include all nine models.")
+                note=f"Total-atom quintile bins used in the paper. Pooled rates include all {len(cases)} leaderboard models.")
 
 
 def logo_sprite() -> str:
@@ -412,16 +450,15 @@ def check_site() -> int:
             problems.append("website release metadata must be v18")
         if any(e.get("verifier_version") != "moldraft.stereochemistry/v18" or e["n"] != 300 for e in doc["entries"]):
             problems.append("all model results must use the v18 verifier and denominator 300")
-        if len(doc["entries"]) != 9 or sum(e["passed"] for e in doc["entries"]) != 1419:
-            problems.append("website scores do not match the nine-model v18 release")
         if {key: value["n"] for key, value in doc["sources"].items()} != {"vsepr": 59, "np": 70, "literature": 171}:
             problems.append("website source categories do not match v18")
         if len(doc["benchmark"]["verifier"]["gates"]) != 3 or doc["benchmark"]["verifier"].get("geometry_blind"):
             problems.append("website must describe all three v18 checks")
         if DATA_REPO:
-            for name, digest in doc["source_files"].items():
-                if sha256(DATA_REPO / name) != digest:
-                    problems.append(f"stale data source: {name}")
+            expected = build_doc()
+            for key in ("source_files", "entries", "atom_bins", "benchmark"):
+                if doc.get(key) != expected[key]:
+                    problems.append(f"leaderboard {key} differs from the current v18 records")
         if "charts" in doc and index.exists():
             problems += charts.check_charts(index.read_text(), doc["charts"])
             for variant in doc["charts"]:
