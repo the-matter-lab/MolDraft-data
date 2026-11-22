@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>How do you know an AI built the right molecule? · MolDraft</title>
+  <meta name="description" content="Hanyong Xu on leading MolDraft as an undergraduate, and what it takes to verify a 3D molecule built from a drawing.">
+  <meta property="og:title" content="How do you know an AI built the right molecule?">
+  <meta property="og:description" content="Inside MolDraft, a benchmark of 300 chemical drawings, and the verifier behind its scores.">
+  <meta property="og:type" content="article">
+  <meta property="og:image" content="https://the-matter-lab.github.io/MolDraft-data/assets/demo/coordination-poster.png">
+  <link rel="icon" href="../assets/moldraft-logo.png">
+  <link rel="stylesheet" href="../fonts/google-sans-code.css">
+  <link rel="stylesheet" href="article.css">
+  <script src="../assets/demo.js" defer></script>
+</head>
+<body>
+<header class="mast"><nav aria-label="Project"><a class="brand" href="../"><img src="../assets/moldraft-logo.png" alt="" width="33" height="33">MolDraft</a><a href="../#leaderboard">Leaderboard</a><a href="https://arxiv.org/abs/2611.25041">Paper ↗</a></nav></header>
+<main>
+  <header class="title">
+    <h1>How do you know an AI built the right molecule?</h1>
+    <p class="byline">Hanyong Xu <span>·</span> <time datetime="2026-11-21">November 21, 2026</time></p>
+  </header>
+  <article>
+    <p>MolDraft was the first research project I led as an undergraduate. Seeing my name first on the arXiv preprint felt a little unreal. It was exciting to have something I could finally point people to. It also meant anyone could open a file we had marked “pass,” turn the molecule around on their screen, and ask me why it deserved that verdict. I wanted to be able to answer for that one molecule.</p>
+    <p>A few days later I read OpenAI’s MedChemBench. One example stayed with me. Given the pieces of a molecule with an 18-atom ring, one model drew a 15-atom ring. Imagine using that structure for the next question about the compound’s properties. You could reason carefully all the way to an answer about a different compound. It made me want to share the part of MolDraft that is easy to skip on the way to the leaderboard. <a href="https://openai.com/index/introducing-medchembench/">Read the MedChemBench example.</a></p>
+
+    <h2 id="task">From a figure in a paper to a file you can use</h2>
+    <p>Chemistry benchmarks ask models to do quite different jobs. Some ask for an explanation of a reaction or a choice among products. Others give a model a molecular structure and ask it to predict a measured property. In a conformer-generation task, the model may start with the bonds already specified. MolDraft starts one step earlier, where a computational chemist often starts in practice. You find a molecule in a paper and want to run a calculation. All you have in front of you is the drawing.</p>
+    <p>Try reading the drawing below. Find the two Ru labels in the middle, then the two Cl labels between them. Each chloride bridges both ruthenium atoms. The drawing also uses shorthand for groups of atoms and leaves most hydrogens implicit. A chemist can read all of that on the page. A simulation needs a position in space for every one of those atoms.</p>
+    <figure class="wide demo">
+      <div class="pair">
+        <div><h3>Input drawing</h3><img src="../assets/demo/coordination-input.png" alt="Two ruthenium centres connected by two bridging chlorides in a chemical drawing."></div>
+        <div><h3>GPT-6 Astra’s submitted structure</h3><img id="demo-animation" src="../assets/demo/coordination-poster.png" data-poster="../assets/demo/coordination-poster.png" data-animation="../assets/demo/coordination-rotation.gif" alt="Rotating view of the verified 102-atom structure of the same complex."><button id="demo-motion" type="button" hidden>Play rotation</button></div>
+      </div>
+      <figcaption>The model received the drawing on the left. The rotation shows its submitted coordinates, including the hydrogens. <a href="https://doi.org/10.1021/acs.organomet.6c00104">Source of the complex</a> · <a href="https://github.com/the-matter-lab/MolDraft-data/blob/main/website/demo/source.json">Files behind the animation</a></figcaption>
+    </figure>
+    <p>We collected 300 drawing–structure pairs. The 59 cases chosen for their local geometry include unusual arrangements around a central atom. The 70 natural products test whether a model can keep track of rings and stereocentres. The other 171 come from the research literature, often with a metal surrounded by several ligands. For each drawing the agent gets the same four tools, one attempt, and no access to the internet or the reference coordinates. It submits an XYZ file, a list of elements and their three-dimensional positions. <a href="../data_300_new.html">Browse the drawings.</a></p>
+
+    <h2 id="verification">What earns a pass?</h2>
+    <p>The first thing we had to check was our own answer key. We reviewed every drawing against its reference, including its atom inventory and depicted stereochemistry. For literature examples, that meant tracing a compound label to its deposited coordinates. We excluded candidates with missing coordinates or a mismatched species. A precise scoring rule would have been little comfort to a model graded against the wrong compound.</p>
+    <p>An XYZ file has an extra wrinkle. It lists positions without identifying the bonds, and its author can list the atoms in any order. Atom 17 in the answer might be atom 41 in the reference. Here is how the independent verifier handles that.</p>
+    <ol class="checks">
+      <li><strong>Identify corresponding atoms.</strong> We check the elements and calculate bond orders on both structures with xTB, keeping the submitted coordinates fixed. MAPPA matches atoms across the two bonding graphs, including hydrogens. That gives us a correspondence with which to compare the bonds, even around a metal. <a href="https://yunhzou.github.io/MAPPA-AAM/">How MAPPA works.</a></li>
+      <li><strong>Check which way the bonds point.</strong> With the atoms matched, the verifier can ask whether a stereocentre flipped or the groups on a double bond switched sides. Either error can leave the list of bonded atoms intact.</li>
+      <li><strong>Check the arrangement around a metal.</strong> The verifier compares which coordination sites are occupied and the angles between them, within stated tolerances. A ligand moving from beside another ligand to opposite it can change the verdict.</li>
+    </ol>
+    <p>For the ruthenium complex above, GPT-6 Astra passed all three checks. Qwen3.8-Max also got the bonding and coarse coordination geometry right, but failed the stereochemistry check. You can see why two convincing-looking 3D models earned different scores. The released verdicts record each check separately. Compare the recorded outcomes for <a href="https://github.com/the-matter-lab/MolDraft-data/blob/bffe2b06b422b929d5bd19c7fdda16ff0ac2a9ef/results/final_results/gpt-6-astra/per_case.csv?plain=1#L192">GPT-6 Astra</a> and <a href="https://github.com/the-matter-lab/MolDraft-data/blob/bffe2b06b422b929d5bd19c7fdda16ff0ac2a9ef/results/final_results/qwen3.8-max/per_case.csv?plain=1#L192">Qwen3.8-Max</a>.</p>
+    <p>There are judgments built into this definition. A flexible side chain can turn and still pass. A pass establishes agreement on the features we test. Whether those coordinates are a good starting point for a particular energy calculation is a further question. We publish the tolerances, the verifier code, and the failure flags. An absent answer or a verification timeout counts as a failure and stays in the denominator. <a href="https://github.com/the-matter-lab/MolDraft-data/blob/main/benchmark/VERIFICATION.md">Read the scoring rules.</a></p>
+
+    <h2 id="error">One carbon facing the wrong way</h2>
+    <p>My favourite example of why the distinction matters is malayamycin A. GPT-6.1 Sol read four of its six stereocentres and missed two bold bonds. Its workaround sounded sensible. It built all four possible combinations for the two uncertain centres, estimated their energies, and kept the lowest. The drawing had already settled the question.</p>
+    <figure class="wide">
+      <a class="plate" href="malayamycin.png"><img src="malayamycin.png" loading="lazy" alt="The drawing marks the two missed bonds. Of four candidate stereoisomers the agent chose the energy minimum. The depicted isomer lies 1.9 kcal/mol above it in that calculation."></a>
+      <figcaption>The two orange ovals mark the cues the agent missed. Its energy ranking favoured a structure with one carbon inverted. Figure from the MolDraft paper, qualitative analysis. <a href="https://arxiv.org/html/2611.25041v1#S4.SS4">Read the case study.</a></figcaption>
+    </figure>
+    <p>The agent’s choice was 1.9 kcal/mol below the depicted isomer in its force-field calculation. It passed the bonding check and failed at the C-glycosidic carbon. Seven of the nine models in the paper solved this case. That single failure tells me something a leaderboard percentage cannot. The agent knew how to build and rank plausible candidates. It lost track of which candidate it had been asked to build.</p>
+
+    <h2 id="difficulty">Where the task gets harder</h2>
+    <p>Only 29 of the 300 molecules passed for all nine models in the paper. The literature set was the lowest-scoring group for every model. One pattern you can see without sorting examples by chemical name is what happens as the structures get bigger.</p>
+    <figure class="size-chart">
+      <table><caption>Mean pass rate across the nine models in the paper</caption>
+      <thead><tr><th scope="col">Atoms, including H</th><th scope="col">Molecules</th><th scope="col">Pass rate</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">18–51</th><td>59</td><td><span style="--rate:65%">65.0%</span></td></tr>
+        <tr><th scope="row">52–66</th><td>58</td><td><span style="--rate:63.4%">63.4%</span></td></tr>
+        <tr><th scope="row">67–80</th><td>64</td><td><span style="--rate:56.4%">56.4%</span></td></tr>
+        <tr><th scope="row">81–107</th><td>57</td><td><span style="--rate:40.2%">40.2%</span></td></tr>
+        <tr><th scope="row">108–202</th><td>62</td><td><span style="--rate:38%">38.0%</span></td></tr>
+      </tbody></table>
+      <figcaption>Every attempt counts in its size group. Size and chemistry vary together in this collection, so these rates alone cannot tell us how much of the drop is due to atom count. <a href="https://arxiv.org/html/2611.25041v1#S4.SS2">See the paper’s size analysis.</a></figcaption>
+    </figure>
+    <p>The highest score in the preprint was GPT-6 Astra’s 228/300. After the paper went up, we ran GPT-6.2 Astra on the same drawings with the same verifier. It passed 230/300 (76.7%) in the November 20 leaderboard update. The two additional passes in the total tell you little about any individual molecule. If you have a chemical family you care about, I’d start by looking at those cases. <a href="../#leaderboard">Explore the leaderboard.</a></p>
+
+    <h2 id="next">What I’d like to test next</h2>
+    <p>I’d start with two drawings of the <em>same</em> molecule. Keep the reference fixed, redraw the bonds in a different layout, then lower the resolution in controlled steps. If an agent succeeds on one version and fails on another, we have a way to study how much of the difficulty comes from reading the figure. A larger collection of size-matched organic molecules and metal complexes would let us ask a different question about the chemistry itself.</p>
+    <p>I’d also put a conventional drawing reader followed by a 3D structure generator through the same verifier. Which structures would it recover that an agent missed? Finally, I’d take the structures that pass and actually start a geometry optimization from each one. How often does it converge, and how far do the atoms have to move? That would bring the benchmark back to the reason I wanted the coordinates in the first place.</p>
+
+    <section id="citation"><h2>Citation</h2>
+      <p>Hanyong Xu, Yunheng Zou, Olalla Nieto Faza, Juan Bernardo Pérez Sánchez, Aiwei Yin, Alán Aspuru-Guzik, and Varinia Bernales. <em>Can Language Models Build Molecules in Three Dimensions?</em> arXiv, 2026. <a href="https://arxiv.org/abs/2611.25041">arXiv:2611.25041</a></p>
+      <details><summary>BibTeX</summary><pre><code>@misc{xu2026moldraft,
+  author = {Xu, Hanyong and Zou, Yunheng and
+    Nieto Faza, Olalla and Pérez Sánchez, Juan Bernardo and
+    Yin, Aiwei and Aspuru-Guzik, Alán and Bernales, Varinia},
+  title = {Can Language Models Build Molecules in Three Dimensions?},
+  year = {2026},
+  eprint = {2611.25041},
+  archivePrefix = {arXiv},
+  primaryClass = {physics.chem-ph},
+  url = {https://arxiv.org/abs/2611.25041}
+}</code></pre></details>
+    </section>
+  </article>
+</main>
+</body></html>

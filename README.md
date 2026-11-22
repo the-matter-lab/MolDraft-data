@@ -8,6 +8,7 @@
 
 <p align="center">
   <a href="https://the-matter-lab.github.io/MolDraft-data/">Leaderboard</a> ·
+  <a href="https://the-matter-lab.github.io/MolDraft-data/blog/">Research blog</a> ·
   <a href="https://the-matter-lab.github.io/MolDraft-data/data_300_new.html">2D Data Gallery</a> ·
   <a href="https://github.com/the-matter-lab/MolDraft-data/releases/latest">Download release</a> ·
   <a href="#citation">Citation</a>
