@@ -490,7 +490,7 @@ def check_site() -> int:
                     problems.append(f"{f.relative_to(SITE)}: leak pattern {pat.pattern!r} matched {m.group(0)!r}")
     # Nothing but the expected file types.
     for f in SITE.rglob("*"):
-        if f.is_file() and f.name != ".nojekyll" and f.suffix.lower() not in {".html", ".css", ".js", ".json", ".svg", ".woff2", ".png", ".gif", ".ico", ".txt", ".md", ".webmanifest"}:
+        if f.is_file() and f.name != ".nojekyll" and f.suffix.lower() not in {".html", ".css", ".js", ".json", ".svg", ".woff2", ".png", ".gif", ".webm", ".ico", ".txt", ".md", ".webmanifest"}:
             problems.append(f"unexpected file type shipped: {f.relative_to(SITE)}")
     if problems:
         print("CHECK FAILED:")

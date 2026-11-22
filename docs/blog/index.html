@@ -12,7 +12,7 @@
   <link rel="icon" href="../assets/moldraft-logo.png">
   <link rel="stylesheet" href="../fonts/google-sans-code.css">
   <link rel="stylesheet" href="article.css">
-  <script src="../assets/demo.js" defer></script>
+  <script src="players.js" defer></script>
 </head>
 <body>
 <header class="mast"><nav aria-label="Project"><a class="brand" href="../"><img src="../assets/moldraft-logo.png" alt="" width="33" height="33">MolDraft</a><a href="../#leaderboard">Leaderboard</a><a href="https://arxiv.org/abs/2611.25041">Paper ↗</a></nav></header>
@@ -23,7 +23,15 @@
   </header>
   <article>
     <p>MolDraft was the first research project I led as an undergraduate. Seeing my name first on the arXiv preprint felt a little unreal. It was exciting to have something I could finally point people to. It also meant anyone could open a file we had marked “pass,” turn the molecule around on their screen, and ask me why it deserved that verdict. I wanted to be able to answer for that one molecule.</p>
-    <p>A few days later I read OpenAI’s MedChemBench. One example stayed with me. Given the pieces of a molecule with an 18-atom ring, one model drew a 15-atom ring. Imagine using that structure for the next question about the compound’s properties. You could reason carefully all the way to an answer about a different compound. It made me want to share the part of MolDraft that is easy to skip on the way to the leaderboard. <a href="https://openai.com/index/introducing-medchembench/">Read the MedChemBench example.</a></p>
+    <p>Reading OpenAI’s MedChemBench brought that question back to me. In one task, a model turned an 18-atom ring into a 15-atom ring. Comparing the two structures catches that change in ring size. But suppose the model read the drawing correctly and the mistake was in the reference. How would we know? <a href="https://cdn.openai.com/pdf/09c4ec60-a32e-4652-837b-1811368a3bb0/medchembench-paper.pdf#page=17">See the macrocycle in MedChemBench.</a></p>
+    <p>There is a documented example in a different dataset. Open drawing 101 in the ACS optical structure recognition benchmark and look at the bottom of the middle ring. The atom there is labelled <strong>O</strong>. The archived reference SMILES puts <strong>S</strong> in that position. There is a sulfur elsewhere in the drawing, linking the central ring to the ring on the right, and both versions agree on that sulfur. In their audit, the COMO authors found that their recognition model read the oxygen correctly and still lost the exact-match point. An LLM returning the same correct structure would lose that point too. <a href="https://arxiv.org/pdf/2604.23546v2#page=28">Compare the three structures in Figure 5, first row.</a></p>
+    <details class="reference-check"><summary>Inspect the SMILES for ACS drawing 101</summary>
+      <p>Both lines below are rendered in canonical SMILES. The first comes from record 101 of <code>real/acs.csv</code>. For the second, I changed the ring atom to the oxygen in <code>real/acs/101.png</code> and canonicalized it with RDKit. The highlighted atom is the only edit.</p>
+      <p>Archived label<br><code>O=c1c(Sc2ccccc2)c<mark>s</mark>c2ccccc12</code></p>
+      <p>Structure in the drawing<br><code>O=c1c(Sc2ccccc2)c<mark>o</mark>c2ccccc12</code></p>
+      <p><a href="https://huggingface.co/yujieq/MolScribe/blob/main/real.zip">Original ACS drawing and label in the MolScribe benchmark archive</a></p>
+    </details>
+    <p>That is why I want to show both sides of a MolDraft verdict. First we check whether a drawing and its reference coordinates describe the same compound. Then an independent program tests what the agent actually built. If either decision looks wrong, another chemist can open the drawing, the structures and the recorded checks and trace it back.</p>
 
     <h2 id="task">From a figure in a paper to a file you can use</h2>
     <p>Chemistry benchmarks ask models to do quite different jobs. Some ask for an explanation of a reaction or a choice among products. Others give a model a molecular structure and ask it to predict a measured property. In a conformer-generation task, the model may start with the bonds already specified. MolDraft starts one step earlier, where a computational chemist often starts in practice. You find a molecule in a paper and want to run a calculation. All you have in front of you is the drawing.</p>
@@ -31,22 +39,30 @@
     <figure class="wide demo">
       <div class="pair">
         <div><h3>Input drawing</h3><img src="../assets/demo/coordination-input.png" alt="Two ruthenium centres connected by two bridging chlorides in a chemical drawing."></div>
-        <div><h3>GPT-6 Astra’s submitted structure</h3><img id="demo-animation" src="../assets/demo/coordination-poster.png" data-poster="../assets/demo/coordination-poster.png" data-animation="../assets/demo/coordination-rotation.gif" alt="Rotating view of the verified 102-atom structure of the same complex."><button id="demo-motion" type="button" hidden>Play rotation</button></div>
+        <div><h3>GPT-6 Astra’s submitted structure</h3><video class="clip" controls playsinline muted preload="metadata" poster="../assets/demo/coordination-poster.png" src="media/coordination.webm" aria-label="Rotate the 102-atom ruthenium complex"></video></div>
       </div>
       <figcaption>The model received the drawing on the left. The rotation shows its submitted coordinates, including the hydrogens. <a href="https://doi.org/10.1021/acs.organomet.6c00104">Source of the complex</a> · <a href="https://github.com/the-matter-lab/MolDraft-data/blob/main/website/demo/source.json">Files behind the animation</a></figcaption>
     </figure>
     <p>We collected 300 drawing–structure pairs. The 59 cases chosen for their local geometry include unusual arrangements around a central atom. The 70 natural products test whether a model can keep track of rings and stereocentres. The other 171 come from the research literature, often with a metal surrounded by several ligands. For each drawing the agent gets the same four tools, one attempt, and no access to the internet or the reference coordinates. It submits an XYZ file, a list of elements and their three-dimensional positions. <a href="../data_300_new.html">Browse the drawings.</a></p>
 
+    <section aria-labelledby="verification">
     <h2 id="verification">What earns a pass?</h2>
-    <p>The first thing we had to check was our own answer key. We reviewed every drawing against its reference, including its atom inventory and depicted stereochemistry. For literature examples, that meant tracing a compound label to its deposited coordinates. We excluded candidates with missing coordinates or a mismatched species. A precise scoring rule would have been little comfort to a model graded against the wrong compound.</p>
-    <p>An XYZ file has an extra wrinkle. It lists positions without identifying the bonds, and its author can list the atoms in any order. Atom 17 in the answer might be atom 41 in the reference. Here is how the independent verifier handles that.</p>
-    <ol class="checks">
-      <li><strong>Identify corresponding atoms.</strong> We check the elements and calculate bond orders on both structures with xTB, keeping the submitted coordinates fixed. MAPPA matches atoms across the two bonding graphs, including hydrogens. That gives us a correspondence with which to compare the bonds, even around a metal. <a href="https://yunhzou.github.io/MAPPA-AAM/">How MAPPA works.</a></li>
-      <li><strong>Check which way the bonds point.</strong> With the atoms matched, the verifier can ask whether a stereocentre flipped or the groups on a double bond switched sides. Either error can leave the list of bonded atoms intact.</li>
-      <li><strong>Check the arrangement around a metal.</strong> The verifier compares which coordination sites are occupied and the angles between them, within stated tolerances. A ligand moving from beside another ligand to opposite it can change the verdict.</li>
-    </ol>
-    <p>For the ruthenium complex above, GPT-6 Astra passed all three checks. Qwen3.8-Max also got the bonding and coarse coordination geometry right, but failed the stereochemistry check. You can see why two convincing-looking 3D models earned different scores. The released verdicts record each check separately. Compare the recorded outcomes for <a href="https://github.com/the-matter-lab/MolDraft-data/blob/bffe2b06b422b929d5bd19c7fdda16ff0ac2a9ef/results/final_results/gpt-6-astra/per_case.csv?plain=1#L192">GPT-6 Astra</a> and <a href="https://github.com/the-matter-lab/MolDraft-data/blob/bffe2b06b422b929d5bd19c7fdda16ff0ac2a9ef/results/final_results/qwen3.8-max/per_case.csv?plain=1#L192">Qwen3.8-Max</a>.</p>
-    <p>There are judgments built into this definition. A flexible side chain can turn and still pass. A pass establishes agreement on the features we test. Whether those coordinates are a good starting point for a particular energy calculation is a further question. We publish the tolerances, the verifier code, and the failure flags. An absent answer or a verification timeout counts as a failure and stays in the denominator. <a href="https://github.com/the-matter-lab/MolDraft-data/blob/main/benchmark/VERIFICATION.md">Read the scoring rules.</a></p>
+    <p>Before scoring a single prediction, we reviewed all 300 drawing–reference pairs by hand. For a literature compound, that meant following its label from the figure to its deposited coordinates and checking the elements, bonds and depicted stereochemistry. We excluded candidates with incomplete coordinates or a mismatch. The automated checks below depend on that first piece of work.</p>
+
+    <h3>Which atoms correspond?</h3>
+    <p>An XYZ file lists elements and positions. Its rows can appear in any order. The verifier checks the atom inventory and uses xTB to estimate bond orders for the submission and reference at their supplied coordinates. MAPPA then finds corresponding atoms across those bonding graphs, hydrogens included. In the three-atom illustration below, watch where the hydrogen goes when the rows change order.</p>
+    <figure class="verifier-clip"><video class="clip" controls playsinline muted preload="metadata" poster="media/atom-map.png" src="media/atom-map.webm" aria-label="Atom correspondence across reordered XYZ files"></video><figcaption>Illustration of correspondence. The three lines connect matching elements in two orderings of H–O–Cl.</figcaption></figure>
+
+    <h3>Which way does the centre point?</h3>
+    <p>The two candidates below have identical bonds. Hold fluorine and chlorine in place and watch the H and Br labels. Exchanging the groups on the solid and hashed wedges reverses the configuration at carbon. MolDraft uses the matched 3D coordinates to check for inversions like this and for changes at double bonds.</p>
+    <figure class="verifier-clip"><video class="clip" controls playsinline muted preload="metadata" poster="media/stereo.png" src="media/stereo.webm" aria-label="Compare two configurations at one carbon"></video><figcaption>Illustrative candidates for one reference. A solid wedge points towards the viewer and a hashed wedge points away.</figcaption></figure>
+
+    <h3>Where do the ligands sit?</h3>
+    <p>In this square-planar example, both candidates have two chlorides bound to platinum. Look at the angle between them. In the reference they are neighbours, roughly 90° apart. In candidate B they face each other across the metal, roughly 180° apart. The verifier checks occupied coordination sites and compares their angles within defined tolerances.</p>
+    <figure class="verifier-clip"><video class="clip" controls playsinline muted preload="metadata" poster="media/metal-sites.png" src="media/metal-sites.webm" aria-label="Compare adjacent and opposite chloride sites at platinum"></video><figcaption>Illustration of cis and trans coordination. Both candidates keep the same four donors attached to Pt.</figcaption></figure>
+
+    <p>In the actual ruthenium example above, GPT-6 Astra passed all three checks. Qwen3.8-Max passed the bonding and coarse coordination checks but failed stereochemistry. The separate verdicts tell a reader where to look. A flexible side chain can turn and still pass. Whether the resulting structure will behave well in a particular energy calculation remains a separate experimental question. Missing answers and verification timeouts count as failures.</p>
+    </section>
 
     <h2 id="error">One carbon facing the wrong way</h2>
     <p>My favourite example of why the distinction matters is malayamycin A. GPT-6.1 Sol read four of its six stereocentres and missed two bold bonds. Its workaround sounded sensible. It built all four possible combinations for the two uncertain centres, estimated their energies, and kept the lowest. The drawing had already settled the question.</p>
@@ -89,6 +105,11 @@
   primaryClass = {physics.chem-ph},
   url = {https://arxiv.org/abs/2611.25041}
 }</code></pre></details>
+      <details class="reading"><summary>Verifier methods and records cited above</summary><ul>
+        <li><a href="https://github.com/the-matter-lab/MolDraft-data/blob/main/benchmark/VERIFICATION.md">MolDraft scoring rules and tolerances</a></li>
+        <li><a href="https://yunhzou.github.io/MAPPA-AAM/">MAPPA atom mapping</a></li>
+        <li>Ruthenium verdicts for <a href="https://github.com/the-matter-lab/MolDraft-data/blob/bffe2b06b422b929d5bd19c7fdda16ff0ac2a9ef/results/final_results/gpt-6-astra/per_case.csv?plain=1#L192">GPT-6 Astra</a> and <a href="https://github.com/the-matter-lab/MolDraft-data/blob/bffe2b06b422b929d5bd19c7fdda16ff0ac2a9ef/results/final_results/qwen3.8-max/per_case.csv?plain=1#L192">Qwen3.8-Max</a></li>
+      </ul></details>
     </section>
   </article>
 </main>
