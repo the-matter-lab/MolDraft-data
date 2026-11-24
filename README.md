@@ -57,7 +57,7 @@ The [2D Data Gallery](https://the-matter-lab.github.io/MolDraft-data/data_300_ne
 
 ## Citation
 
-If you use MolDraft, please cite the [benchmark release](https://github.com/the-matter-lab/MolDraft-data/releases/tag/verifier) and the [accompanying preprint](https://arxiv.org/abs/2611.25041). GitHub provides dataset citation exports from [CITATION.cff](CITATION.cff).
+If you use MolDraft, please cite the [archived benchmark dataset](https://doi.org/10.5281/zenodo.24511623) and the [accompanying preprint](https://arxiv.org/abs/2611.25041). GitHub provides dataset citation exports from [CITATION.cff](CITATION.cff).
 
 ```bibtex
 @misc{xu2026moldraft,
