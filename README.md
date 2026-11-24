@@ -7,6 +7,7 @@
 <p align="center"><strong>Can Language Models Build Molecules in Three Dimensions?</strong></p>
 
 <p align="center">
+  <a href="https://arxiv.org/abs/2611.25041">Paper (arXiv)</a> ·
   <a href="https://the-matter-lab.github.io/MolDraft-data/">Leaderboard</a> ·
   <a href="https://the-matter-lab.github.io/MolDraft-data/blog/">Research blog</a> ·
   <a href="https://the-matter-lab.github.io/MolDraft-data/data_300_new.html">2D Data Gallery</a> ·
@@ -27,7 +28,7 @@ The benchmark contains **300 drawing–structure pairs** across 59 VSEPR-curated
 | Model scores | [Main results summary](results/final_results/summary.csv) and [model and ablation comparison](results/final_results/accuracy_all_models_and_ablations.csv) |
 | GPT-6.2 Astra leaderboard run | [Per-molecule scores and usage](website/supplemental_runs/gpt-6.2-astra.json) |
 | Main answers, sessions, and verdicts | [Answer index](results/final_results/answer_index.csv), [per-model records](results/final_results), and [combined verdicts](results/final_results/verification_2700.json) |
-| Paired tool ablation | [Ablation records](results/two_tool_ablation) and [per-molecule comparison](results/two_tool_ablation/eval/comparison.csv) |
+| Paired tool ablation | [Two-tool records](results/two_tool_ablation), [four-tool GPT-6.1 Sol baseline](results/final_results/gpt-6.1-sol), and [per-molecule comparison](results/two_tool_ablation/eval/comparison.csv) |
 | Prompts and model settings | [Main run settings](configuration) and [ablation run configuration](results/two_tool_ablation/eval/run_config.json) |
 | Manuscript analysis | [analysis/](analysis) |
 
@@ -48,7 +49,7 @@ The [integrity check](VALIDATION.md) verifies file hashes, dataset completeness,
 
 ## Evaluation setup
 
-The benchmark uses Estructural, built on [El Agente (AgentNet)](https://github.com/the-matter-lab/ElAgente). Each molecule gets one attempt of at most 100 model calls. The agent runs without network access or access to the reference structures. The [website's Setup section](https://the-matter-lab.github.io/MolDraft-data/#about) links to the four tool implementations. The [Estructural case studies](https://github.com/the-matter-lab/ElAgenteEstructuralCaseStudies) are public.
+The benchmark uses Estructural, built on [El Agente (AgentNet)](https://github.com/the-matter-lab/ElAgente). Each molecule gets one attempt of at most 100 model calls. The agent runs without network access or access to the reference structures. Rerunning the original agent workflow requires access to the private El Agente repository. The [website's Setup section](https://the-matter-lab.github.io/MolDraft-data/#about) links to the four tool implementations. The [Estructural case studies](https://github.com/the-matter-lab/ElAgenteEstructuralCaseStudies) are public.
 
 ## Sources and rights
 
@@ -56,17 +57,19 @@ The [2D Data Gallery](https://the-matter-lab.github.io/MolDraft-data/data_300_ne
 
 ## Citation
 
-If you use MolDraft, please cite the benchmark and its accompanying manuscript. GitHub also provides citation exports from [CITATION.cff](CITATION.cff).
+If you use MolDraft, please cite the [v18 benchmark release](https://github.com/the-matter-lab/MolDraft-data/releases/tag/v18) and the [accompanying preprint](https://arxiv.org/abs/2611.25041). GitHub provides dataset citation exports from [CITATION.cff](CITATION.cff).
 
 ```bibtex
 @misc{xu2026moldraft,
-  title        = {Can Language Models Build Molecules in Three Dimensions?},
-  author       = {Xu, Hanyong and Zou, Yunheng and Nieto Faza, Olalla and
-                  Perez Sanchez, Juan Bernardo and Yin, Aiwei and
-                  Aspuru-Guzik, Al{\'a}n and Bernales, Varinia},
-  year         = {2026},
-  howpublished = {MolDraft benchmark dataset and evaluation records},
-  url          = {https://github.com/the-matter-lab/MolDraft-data/releases/latest}
+  title         = {Can Language Models Build Molecules in Three Dimensions?},
+  author        = {Xu, Hanyong and Zou, Yunheng and Nieto Faza, Olalla and
+                   P{\'e}rez S{\'a}nchez, Juan Bernardo and Yin, Aiwei and
+                   Aspuru-Guzik, Al{\'a}n and Bernales, Varinia},
+  year          = {2026},
+  eprint        = {2611.25041},
+  archivePrefix = {arXiv},
+  primaryClass  = {physics.chem-ph},
+  url           = {https://arxiv.org/abs/2611.25041}
 }
 ```
 

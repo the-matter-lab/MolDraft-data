@@ -65,7 +65,6 @@ assert combined["verifier"]["schema"] == VERIFIER
 assert len(combined["rows"]) == 2700
 by_pair = {(row["model"], row["name"]): row for row in combined["rows"]}
 assert len(by_pair) == 2700
-model_records = {}
 for model, counts in release["models"].items():
     folder = f"results/final_results/{model}"
     data = load(folder + "/verification.json")
@@ -77,7 +76,6 @@ for model, counts in release["models"].items():
     assert all("previous_pass" not in row and "previous_flag" not in row for row in rows)
     assert all(by_pair[(model, row["name"])] == row for row in rows), model
     records = {row["name"]: row for row in rows}
-    model_records[model] = records
     total = sum(passed(row) for row in rows)
     assert total == counts["passes"] == data["n_pass"]
     summary = load(folder + "/summary.json")
@@ -103,21 +101,19 @@ for row in summary_rows:
     assert int(row["accuracy_denominator"]) == 300
 
 ablation = load("results/two_tool_ablation/eval/verification.json")
-baseline = load("results/two_tool_ablation/eval/baseline_verification.json")
-for data, expected in [(ablation, 201), (baseline, 214)]:
-    assert data["result_set"] == RESULT_SET
-    assert data["verifier"]["schema"] == VERIFIER
-    assert len(data["rows"]) == 300 and {row["name"] for row in data["rows"]} == names
-    assert {row["verifier_version"] for row in data["rows"]} == {VERIFIER}
-    assert sum(passed(row) for row in data["rows"]) == data["n_pass"] == expected
+assert ablation["result_set"] == RESULT_SET
+assert ablation["verifier"]["schema"] == VERIFIER
+assert len(ablation["rows"]) == 300 and {row["name"] for row in ablation["rows"]} == names
+assert {row["verifier_version"] for row in ablation["rows"]} == {VERIFIER}
+assert sum(passed(row) for row in ablation["rows"]) == ablation["n_pass"] == 201
 ablation_records = {row["name"]: row for row in ablation["rows"]}
-for row in baseline["rows"]:
-    main = model_records["gpt-6.1-sol"][row["name"]]
-    for key in ["verifier_version", "overall_pass", "flag", "reference_sha256", "answer_sha256"]:
-        assert row[key] == main[key], (row["name"], key)
-for row in table("results/two_tool_ablation/eval/comparison.csv"):
-    assert (row["ablation_pass"].lower() in {"true", "1"}) == passed(ablation_records[row["name"]])
-    assert (row["baseline_pass"].lower() in {"true", "1"}) == passed(model_records["gpt-6.1-sol"][row["name"]])
+assert release["models"]["gpt-6.1-sol"]["passes"] == 214
+comparison = table("results/two_tool_ablation/eval/comparison.csv")
+assert len(comparison) == 300 and {row["name"] for row in comparison} == names
+for row in comparison:
+    name = row["name"]
+    assert (row["ablation_pass"].lower() in {"true", "1"}) == passed(ablation_records[name])
+    assert (row["baseline_pass"].lower() in {"true", "1"}) == passed(by_pair[("gpt-6.1-sol", name)])
 
 for path, expected_count, lookup in [
     ("results/final_results/answer_index.csv", 2700, by_pair),
