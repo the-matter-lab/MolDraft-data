@@ -36,4 +36,4 @@ The checked-in GIF and still frame need no rendering dependencies to serve or bu
 python website/render_demo.py
 ```
 
-`website/demo/source.json` records the exact input drawing, generated answer, verification record, and their hashes. `website/demo/structure.npz` contains the corresponding verifier-owned single-point arrays. The renderer confirms that the coordinates match the deposited generated answer and that it passes all three v18 checks before producing a rigid rotation. The original coordinates are never optimized or replaced. GIF playback can be paused and defaults to a still frame when reduced motion is requested.
+`website/demo/source.json` records the exact input drawing, generated answer, verification record, and their hashes. `website/demo/structure.npz` contains the corresponding verifier-owned single-point arrays. The renderer confirms that the coordinates match the deposited generated answer and that it passes all three verifier checks before producing a rigid rotation. The original coordinates are never optimized or replaced. GIF playback can be paused and defaults to a still frame when reduced motion is requested.

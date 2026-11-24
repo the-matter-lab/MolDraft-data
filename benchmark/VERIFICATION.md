@@ -1,7 +1,7 @@
-# MolDraft v18 verifier
+# MolDraft verifier
 
-`structure_verifier.py` is the implementation used for the v18 2700 main and
-300 ablation records. Install `requirements-current.txt` in Python 3.12, with
+`structure_verifier.py` is the implementation used for the 2,700 main and 300
+ablation records. Install `requirements-current.txt` in Python 3.12, with
 xTB 6.7.1 available separately for GFN2 single points. MAPPA is unmodified.
 
 Compute GT and prediction WBO matrices at the reference charge/spin without

@@ -19,7 +19,7 @@ MolDraft benchmarks how well multimodal language models build 3D molecular struc
 
 ## Dataset and results
 
-The benchmark contains **300 drawing–structure pairs** across 59 VSEPR-curated structures, 70 natural products, and 171 literature structures. The current leaderboard covers ten models and **1,649 of 3,000 attempts passed**. GPT-6.2 Astra leads with **230/300 (76.7%)**. The v18 manuscript release covers nine models and 1,419 passes in 2,700 attempts. In the paired GPT-6.1 Sol ablation, the two-tool setup resolves **201/300** molecules and the four-tool setup resolves **214/300**.
+The benchmark contains **300 drawing–structure pairs** across 59 VSEPR-curated structures, 70 natural products, and 171 literature structures. The current leaderboard covers ten models and **1,649 of 3,000 attempts passed**. GPT-6.2 Astra leads with **230/300 (76.7%)**. The manuscript evaluation covers nine models and 1,419 passes in 2,700 attempts. In the paired GPT-6.1 Sol ablation, the two-tool setup resolves **201/300** molecules and the four-tool setup resolves **214/300**.
 
 | What you need | Where to find it |
 | --- | --- |
@@ -57,7 +57,7 @@ The [2D Data Gallery](https://the-matter-lab.github.io/MolDraft-data/data_300_ne
 
 ## Citation
 
-If you use MolDraft, please cite the [v18 benchmark release](https://github.com/the-matter-lab/MolDraft-data/releases/tag/v18) and the [accompanying preprint](https://arxiv.org/abs/2611.25041). GitHub provides dataset citation exports from [CITATION.cff](CITATION.cff).
+If you use MolDraft, please cite the [benchmark release](https://github.com/the-matter-lab/MolDraft-data/releases/tag/verifier) and the [accompanying preprint](https://arxiv.org/abs/2611.25041). GitHub provides dataset citation exports from [CITATION.cff](CITATION.cff).
 
 ```bibtex
 @misc{xu2026moldraft,

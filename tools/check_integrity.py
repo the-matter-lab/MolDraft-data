@@ -1,4 +1,4 @@
-"""Validate the deposited MolDraft v18 data, scores, versions, and file hashes."""
+"""Validate the deposited MolDraft data, scores, versions, and file hashes."""
 from pathlib import Path
 from collections import Counter
 import csv
@@ -40,7 +40,8 @@ payload = {str(path.relative_to(ROOT)) for path in ROOT.rglob("*")
 assert set(checksums) == payload, "Checksum coverage does not match the deposited files"
 
 release = load("release.json")
-assert release["version"] == release["release_tag"] == VERSION
+assert release["version"] == VERSION
+assert release["release_tag"] == "verifier"
 assert release["result_set"] == RESULT_SET
 assert release["current_verifier_version"] == VERIFIER
 assert release["main_verifier_versions"] == {VERIFIER: 2700}
@@ -144,5 +145,5 @@ for row in flat:
 for name, digest in load("analysis/ablation_metrics.json")["inputs_sha256"].items():
     assert hashlib.sha256((ROOT / name).read_bytes()).hexdigest() == digest
 
-print("v18 integrity passed: file hashes; 300 drawing/reference pairs; 2,700 main and 300 ablation verdicts; "
-      "all summaries and answer indices; uniform v18 verifier and result-set labels.")
+print("MolDraft integrity passed: file hashes; 300 drawing/reference pairs; 2,700 main and 300 ablation verdicts; "
+      "all summaries and answer indices; consistent verifier and result-set identifiers.")
