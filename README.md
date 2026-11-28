@@ -86,7 +86,7 @@ python -m benchmark verify --run work/gpt-6.1-sol --workers 4
 
 The default agent exposes `view_png_file`, `view_molecule`, `constraint_xtb`, and `bash_kernel`. Add `--profile png-bash` to the generation command to run the two-tool ablation in a fresh output directory. The runner uses the deposited prompts, reasoning levels, one attempt per molecule and at most 100 model calls per attempt. Endpoint behavior and sampling can affect newly generated answers. The deposited results remain the record of the published runs.
 
-Scoring uses v18 with a 300-second whole-case watchdog. Every attempt is in the denominator, including missing answers and verifier failures. A limited run is a subset check. See the [verification method](benchmark/VERIFICATION.md) and [recorded policy](benchmark/verification_policy.json).
+Scoring uses v18 with a 300-second whole-case watchdog. The `verify` command writes `eval/verification.json` and `eval/per_case.csv` inside the run directory. Every attempt is in the denominator, including missing answers and verifier failures. A limited run is a subset check. See the [verification method](benchmark/VERIFICATION.md) and [recorded policy](benchmark/verification_policy.json).
 
 You can also score your own reference/answer pair without calling a model:
 
@@ -94,15 +94,17 @@ You can also score your own reference/answer pair without calling a model:
 python -m benchmark verify-xyz --reference reference.xyz --prediction answer.xyz --work-dir work/pair
 ```
 
-### Follow a session locally
+### Trace the minimal agent locally
 
-The runner writes one JSON object per line to `transcript.jsonl` as the session runs. The log includes prompts, model replies, token usage, tool calls, and text outputs. Image outputs appear as `[image]` markers. Once the first session starts, open its transcript in an editor or follow it from another terminal at the repository root:
+The minimal four-tool agent writes its runtime files to the directory passed to `--out`. It appends one JSON object per line to each case's `transcript.jsonl` as the session runs. The log records prompts, model replies, token usage, tool calls, and text outputs. Image outputs appear as `[image]` markers.
+
+For the command above with `--out work/smoke`, open the transcript in an editor or follow it from a second terminal at the repository root once the case starts:
 
 ```bash
 tail -f work/smoke/sessions/mol_0001/transcript.jsonl
 ```
 
-The published drawings and reference coordinates are in [`data/`](data), and the paper's archived answers, transcripts, and verdicts are in [`results/`](results). New runs write to the directory passed to `--out`. For the example `--out work/smoke`, paths inside that directory are:
+The agent's paths inside `work/smoke` are:
 
 | File or directory | Contents |
 | --- | --- |
@@ -111,9 +113,8 @@ The published drawings and reference coordinates are in [`data/`](data), and the
 | `sessions/mol_0001/session.json` | Final session status and call and token counts |
 | `sessions/mol_0001/answer.xyz` | Submitted coordinates, if the case produced a submission |
 | `work/mol_0001/` | Anonymous input image and working files created by the tools |
-| `eval/verification.json` and `eval/per_case.csv` | Scores and failure reasons written by `verify` |
 
-These local files are available without a tracing service. You can use the JSONL records with your own tracing or analysis tools. The top-level `work/` directory used in the examples is ignored by Git.
+Use `run.json` to find the anonymous case ID for a particular molecule. The local logs work without a tracing account, and you can feed the JSONL records to your own tools. The top-level `work/` directory used in the examples is ignored by Git.
 
 ## Sources and rights
 
