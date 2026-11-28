@@ -2,6 +2,8 @@
 
 The MolDraft website contains the leaderboard, interactive charts, and 2D Data Gallery. The checked-in site is in [`docs/`](../docs), and its builder and templates are in this directory.
 
+The [launch materials](promotion) contain the final social thread and its media.
+
 ## Preview the website
 
 From the repository root, serve the checked-in site:

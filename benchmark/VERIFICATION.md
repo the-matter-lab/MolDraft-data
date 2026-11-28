@@ -10,6 +10,10 @@ triple to `structure_verifier.verify_arrays`; the matrix interface uses Angstrom
 coordinates. The campaign enforces a 300-second whole-case process watchdog;
 the library caller must supply this outer guard when reproducing that policy.
 
+The packaged command `python -m benchmark verify --run work/<run>` applies the
+watchdog to both xTB single points and the structure comparison. Use
+`python -m benchmark verify-xyz --help` to score a single XYZ pair.
+
 The unchanged native MAPPA search uses 3 seeds, branch cap 10000, iso tolerance
 1, graph/cut floor 0.15, ordinary/metal WBO-change thresholds 0.5/0.3 and no cut
 sweep. One native zero-event correspondence is used for all coordinate checks.

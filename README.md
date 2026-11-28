@@ -36,7 +36,7 @@ The release includes 2,605 main answers, 300 ablation answers, and all 3,000 ses
 
 ## Quick start
 
-Download the source archive from [GitHub Releases](https://github.com/the-matter-lab/MolDraft-data/releases/latest), or clone the repository to browse the data and reproduce the score summaries.
+The repository includes the data, a standalone four-tool agent, and the published verifier. Use the current `main` branch to run new evaluations.
 
 ```bash
 git clone https://github.com/the-matter-lab/MolDraft-data.git
@@ -45,15 +45,60 @@ python tools/check_integrity.py
 python tools/summarize_results.py
 ```
 
-The [integrity check](VALIDATION.md) verifies file hashes, dataset completeness, and agreement across the result tables. For a new evaluation, see the [verifier guide](benchmark/VERIFICATION.md) and [recorded verification policy](benchmark/verification_policy.json). The guide documents the Python dependencies, xTB version, and MAPPA pin.
+The [integrity check](VALIDATION.md) verifies file hashes, dataset completeness, and agreement across the result tables. The [Zenodo snapshot](https://doi.org/10.5281/zenodo.24511623) archives the paper data.
 
-## Evaluation setup
+## Run the benchmark
 
-The benchmark uses Estructural, built on [El Agente (AgentNet)](https://github.com/the-matter-lab/ElAgente). Each molecule gets one attempt of at most 100 model calls. The agent runs without network access or access to the reference structures. Rerunning the original agent workflow requires access to the private El Agente repository. The [website's Setup section](https://the-matter-lab.github.io/MolDraft-data/#about) links to the four tool implementations. The [Estructural case studies](https://github.com/the-matter-lab/ElAgenteEstructuralCaseStudies) are public.
+Use Linux with unprivileged user, mount, PID, and network namespaces enabled. The launcher uses `unshare`, `mount`, `setpriv`, and `chroot` from the system. On Debian or Ubuntu install `util-linux` and `coreutils` if needed. Install the scientific tools in a dedicated environment outside the data and run directories.
+
+```bash
+mamba env create -f environment.yml
+mamba activate moldraft
+python -m pip install -r benchmark/requirements-runner.txt
+python -m benchmark check
+```
+
+The check verifies the namespace sandbox, xTB and MAPPA installation before you use a model API. Each session starts with one anonymous PNG. The shell and programs it launches can write to that session only. They see a cleared environment, a read-only tool installation, and an isolated network. Model requests are made by the runner outside the tool sandbox. If the host blocks the namespaces, use a Linux VM or compute node that permits them.
+
+Set the API key for your model in your shell. The published model IDs and reasoning levels are listed in [configuration/models.json](configuration/models.json).
+
+| Interface | Provider selection | Credentials and endpoint |
+| --- | --- | --- |
+| OpenAI Responses | `--provider openai` or automatic for `gpt-*` | `OPENAI_API_KEY`, optional `OPENAI_BASE_URL` ending in `/v1` |
+| Anthropic Messages | `--provider anthropic` or automatic for `claude-*` | `ANTHROPIC_API_KEY`, optional `ANTHROPIC_BASE_URL` |
+| OpenAI-compatible Chat Completions | `--provider chat` or automatic for Kimi and Qwen | `MOONSHOT_API_KEY` with optional `MOONSHOT_BASE_URL`, or `QWEN_API_KEY` with `QWEN_BASE_URL` |
+
+Use `MOLDRAFT_API_KEY` and `MOLDRAFT_BASE_URL` to override those settings for a compatible endpoint. If your provider uses a different ID for the same model, set `--api-model` and keep the paper ID in `--model` to load its settings.
+
+Run two cases to check your endpoint and tools. The example assumes you have access to `gpt-6.1-sol`.
+
+```bash
+python -m benchmark run --model gpt-6.1-sol --limit 2 --out work/smoke
+python -m benchmark verify --run work/smoke
+```
+
+Run the complete 300-molecule benchmark in a separate directory:
+
+```bash
+python -m benchmark run --model gpt-6.1-sol --workers 4 --out work/gpt-6.1-sol
+python -m benchmark verify --run work/gpt-6.1-sol --workers 4
+```
+
+The default agent exposes `view_png_file`, `view_molecule`, `constraint_xtb`, and `bash_kernel`. Add `--profile png-bash` to the generation command to run the two-tool ablation in a fresh output directory. The runner uses the deposited prompts, reasoning levels, one attempt per molecule and at most 100 model calls per attempt. Endpoint behavior and sampling can affect newly generated answers. The deposited results remain the record of the published runs.
+
+Submitted coordinates, tool transcripts, and attempt status are in `sessions/`. Each `verify` run writes `eval/verification.json` and `eval/per_case.csv`. Scoring uses v18 with a 300-second whole-case watchdog. Every attempt is in the denominator, including missing answers and verifier failures. A limited run is a subset check. See the [verification method](benchmark/VERIFICATION.md) and [recorded policy](benchmark/verification_policy.json).
+
+You can also score your own reference/answer pair without calling a model:
+
+```bash
+python -m benchmark verify-xyz --reference reference.xyz --prediction answer.xyz --work-dir work/pair
+```
 
 ## Sources and rights
 
 The [2D Data Gallery](https://the-matter-lab.github.io/MolDraft-data/data_300_new.html) shows sources for each drawing and reference structure. The same records are in the [dataset bibliography](data/REFERENCES.md) and [per-molecule provenance table](data/references.tsv). See [source notices](SOURCE_NOTICES.md) for attribution and licence terms.
+
+The original MolDraft software and its documentation are released under the [MIT License](LICENSE). Dataset drawings and coordinates retain their source-specific terms. External dependencies retain their own licences.
 
 ## Citation
 
@@ -73,4 +118,4 @@ If you use MolDraft, please cite the [archived benchmark dataset](https://doi.or
 }
 ```
 
-Website maintenance and asset build instructions are in the [website guide](website/README.md).
+Website maintenance and asset build instructions are in the [website guide](website/README.md). The launch thread and video assets are in [website/promotion](website/promotion).

@@ -299,7 +299,7 @@
     }
 
     var lead = [];
-    if (name) lead.push('The agent is ', linkedLabel(github.agent, name));
+    if (name) lead.push('To run a new evaluation, use ', linkedLabel(github.agent, name));
     if (framework) lead.push(lead.length ? ', built on ' : 'The agent is built on ', linkedLabel(github.framework, framework));
     if (tools.length) {
       lead.push((lead.length ? ', with ' : 'The agent has ') + words(tools.length) + (tools.length === 1 ? ' tool: ' : ' tools: '));

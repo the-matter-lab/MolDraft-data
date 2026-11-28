@@ -2,6 +2,11 @@
 
 Individual coordinate and drawing sources are listed in `data/references.tsv` and `data/REFERENCES.md`. Their source-specific copyright and licence conditions apply.
 
+The repository's [MIT License](LICENSE) applies to the original MolDraft software
+and its software documentation. The dataset and promotional reproductions of
+third-party drawings remain subject to the terms recorded here and in the source
+tables.
+
 ## American Chemical Society drawings
 
 The nine `shot_mor41_` drawings are crops from Figure 1 of Dohm et al., species PR25, PR16, PR41, ED26, PR36, PR22, PR04, PR10, and PR24.

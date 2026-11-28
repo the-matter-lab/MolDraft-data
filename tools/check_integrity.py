@@ -11,6 +11,13 @@ VERIFIER = "moldraft.stereochemistry/v18"
 RESULT_SET = "moldraft.formal/v18"
 
 
+def is_payload(path):
+    relative = path.relative_to(ROOT)
+    return (path.is_file() and path.name != "checksums.sha256"
+            and not {".git", "__pycache__", ".pytest_cache", ".venv", "work"}.intersection(relative.parts)
+            and path.name != ".env" and not path.name.startswith(".env."))
+
+
 def load(path):
     return json.loads((ROOT / path).read_text())
 
@@ -33,10 +40,7 @@ for line in (ROOT / "checksums.sha256").read_text().splitlines():
     assert path.is_file(), name
     assert hashlib.sha256(path.read_bytes()).hexdigest() == expected, name
     checksums[name] = expected
-payload = {str(path.relative_to(ROOT)) for path in ROOT.rglob("*")
-           if path.is_file() and ".git" not in path.relative_to(ROOT).parts
-           and "__pycache__" not in path.relative_to(ROOT).parts
-           and path.name != "checksums.sha256"}
+payload = {path.relative_to(ROOT).as_posix() for path in ROOT.rglob("*") if is_payload(path)}
 assert set(checksums) == payload, "Checksum coverage does not match the deposited files"
 
 release = load("release.json")
